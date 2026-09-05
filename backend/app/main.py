@@ -24,6 +24,10 @@ app.add_middleware(
 async def root():
     return {"status": "online", "projeto": "Clima-Zap APIEXT III"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 @app.get("/api/v1/clima/ping")
 async def ping_clima():
     return {"mensagem": "Módulo de clima pronto para integração com Open-Meteo"} 
