@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # Importações que nós criamos nos passos anteriores
-from app.api import fetch_cariri_weather
-from app.schemas import WeatherData
+from backend.app.api.api import fetch_cariri_weather
+from backend.app.schemas.schemas import WeatherData
 
 app = FastAPI(
     title="Clima-Zap API",
