@@ -1,6 +1,7 @@
-import httpx from app.schemas import WeatcherData
+import httpx
+from app.schemas import WeatherData
 
-async def fetch_cariri_weather() -> WeatcherData:
+async def fetch_cariri_weather() -> WeatherData:
     url = "https://api.open-meteo.com/v1/forecast"
 
 #coordenadas aproximadas do Cariri(Barbalha/juazeiro do Norte)
