@@ -4,6 +4,7 @@
 backend/.env
 
 # Ambientes virtuais e pacotes
+.venv/
 venv/
 __pycache__/
 *.pyc
