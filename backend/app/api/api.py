@@ -1,5 +1,5 @@
 import httpx
-from app.schemas import WeatherData
+from app.schemas.schemas import WeatherData
 
 async def fetch_cariri_weather() -> WeatherData:
     url = "https://api.open-meteo.com/v1/forecast"

@@ -12,4 +12,3 @@ class WeatherData(BaseModel):
     latitude: float
     longitude: float
     current: CurrentWeather
-# HELLO
