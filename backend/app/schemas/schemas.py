@@ -11,4 +11,9 @@ class CurrentWeather(BaseModel):
 class WeatherData(BaseModel):
     latitude: float
     longitude: float
+<<<<<<< HEAD
     current: CurrentWeather
+=======
+    current: CurrentWeather
+# HELLO
+>>>>>>> main

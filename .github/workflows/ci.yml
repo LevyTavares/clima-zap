@@ -27,9 +27,5 @@ jobs:
 
     - name: Executar suíte de testes com Pytest
       run: |
-        if find backend -type f \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
-          cd backend
-          PYTHONPATH=. python -m pytest
-        else
-          echo "Nenhum arquivo de teste Python encontrado em backend. Pulando execução do pytest."
-        fi
+        cd backend
+        PYTHONPATH=. python -m pytest
