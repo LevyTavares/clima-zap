@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.schemas import WeatherData
+from app.schemas.schemas import WeatherData
 from app.main import app
 
 
@@ -44,5 +44,8 @@ def test_cariri_weather_endpoint(monkeypatch):
     response = client.get("/api/v1/clima/cariri")
 
     assert response.status_code == 200
-    assert response.json()["latitude"] == -7.31
-    assert response.json()["current"]["temperature_2m"] == 28.5
+    data = response.json()
+    assert data["weather"]["latitude"] == -7.31
+    assert data["weather"]["current"]["temperature_2m"] == 28.5
+    assert "alerts" in data
+    assert len(data["alerts"]) == 1  # UV igual a 8 aciona 1 alerta
