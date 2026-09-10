@@ -2,9 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Importações com caminhos relativos ao diretório backend/
 from app.api.api import fetch_cariri_weather
-from app.schemas.schemas import WeatherData
+from app.services.alerts import generate_weather_alerts
 
 app = FastAPI(
     title="Clima-Zap API",
@@ -12,7 +11,6 @@ app = FastAPI(
     description="API de monitoramento e alertas climáticos para o Cariri"
 )
 
-# Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,11 +27,24 @@ async def root():
 async def ping_clima():
     return {"mensagem": "Módulo de clima pronto para integração com Open-Meteo"} 
 
-@app.get("/api/v1/clima/cariri", response_model=WeatherData)
+@app.get("/api/v1/clima/cariri")
 async def get_clima_cariri():
     try:
         weather_info = await fetch_cariri_weather()
-        return weather_info
+        
+        # Extrai os parâmetros para calcular as regras de alerta
+        current = weather_info.get("current", {}) if isinstance(weather_info, dict) else weather_info.current.model_dump()
+        uv = current.get("uv_index", 0.0)
+        humidity = current.get("relative_humidity_2m", 0.0)
+        rain = current.get("rain", 0.0)
+        
+        # Processa as regras de negócio
+        alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
+        
+        return {
+            "weather": weather_info,
+            "alerts": alerts
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}")
 
