@@ -4,4 +4,5 @@ from typing import Dict, Any
 class WebhookPayload(BaseModel):
     event: str
     instance: str
-    data: Dict[str, Any] = {}
+    data: Dict[str, Any] = {} 
+     
