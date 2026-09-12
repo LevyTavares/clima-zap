@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from app.api.webhook import router as webhook_router
 
 from app.api.api import fetch_cariri_weather
 from app.services.alerts import generate_weather_alerts
@@ -73,3 +74,9 @@ def route_command(command: str, sender: str) -> str:
     if command.startswith("forecast"):
         return ("forecast_ready")
     return ("comando_nao_entendido")
+
+app.include_router(webhook_router)
+
+@app.get("/")
+def health_check():
+    return {"status": "online", "projeto": "Clima-Zap test"}
