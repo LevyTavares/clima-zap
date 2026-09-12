@@ -64,7 +64,7 @@ app.include_router(webhook_router)
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "project": "Clima-Zap"}
+    return {"status": "online", "projeto": "Clima-Zap APIEXT III"}
 
 
 @app.get("/health")
