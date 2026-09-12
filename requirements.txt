@@ -17,10 +17,10 @@ pluggy==1.6.0
 pydantic==2.13.4
 pydantic_core==2.46.4
 Pygments==2.21.0
+pytest==9.1.1
 python-dotenv==1.2.3
 starlette==1.6.0
 truststore==0.10.4
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.52.4
-pytest==9.1.1

@@ -1,18 +1,55 @@
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Importações com caminhos relativos ao diretório backend/
 from app.api.api import fetch_cariri_weather
-from app.schemas.schemas import WeatherData
+from app.api.webhook import router as webhook_router
+from app.services.alerts import generate_weather_alerts
+
+logger = logging.getLogger(__name__)
+ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
+scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
+
+
+async def process_scheduled_weather_alerts() -> None:
+    weather_info = await fetch_cariri_weather()
+    current = weather_info.current.model_dump()
+    alerts = generate_weather_alerts(
+        uv_index=current.get("uv_index", 0.0),
+        humidity=current.get("relative_humidity_2m", 0.0),
+        rain_prob=current.get("rain", 0.0),
+    )
+
+    for alert in alerts:
+        logger.warning("Alerta climático programado: %s", alert)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    scheduler.add_job(
+        process_scheduled_weather_alerts,
+        trigger="cron",
+        hour=",".join(map(str, ALERT_SCHEDULE_HOURS)),
+        minute=0,
+        id="scheduled_weather_alerts",
+        replace_existing=True,
+    )
+    scheduler.start()
+    try:
+        yield
+    finally:
+        scheduler.shutdown()
+
 
 app = FastAPI(
     title="Clima-Zap API",
     version="1.0.0",
-    description="API de monitoramento e alertas climáticos para o Cariri"
+    description="API de monitoramento e alertas climáticos para o Cariri",
+    lifespan=lifespan,
 )
 
-# Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,44 +58,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Registra o roteador do webhook modularizado
+app.include_router(webhook_router)
+
+
 @app.get("/")
-async def root():
-    return {"status": "online", "projeto": "Clima-Zap APIEXT III"}
+def health_check():
+    return {"status": "online", "project": "Clima-Zap"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 @app.get("/api/v1/clima/ping")
 async def ping_clima():
-    return {"mensagem": "Módulo de clima pronto para integração com Open-Meteo"} 
+    return {"mensagem": "Módulo de clima pronto para integração com Open-Meteo"}
 
-@app.get("/api/v1/clima/cariri", response_model=WeatherData)
+
+@app.get("/api/v1/clima/cariri")
 async def get_clima_cariri():
     try:
         weather_info = await fetch_cariri_weather()
-        return weather_info
+        current = (
+            weather_info.get("current", {})
+            if isinstance(weather_info, dict)
+            else weather_info.current.model_dump()
+        )
+        uv = current.get("uv_index", 0.0)
+        humidity = current.get("relative_humidity_2m", 0.0)
+        rain = current.get("rain", 0.0)
+
+        alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
+
+        return {"weather": weather_info, "alerts": alerts}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}")
-
-# --- WEBHOOK WHATSAPP ---
-class WebhookPayload(BaseModel):
-    message: str = ""
-    sender: str = ""
-    to: str = ""
-
-@app.post("/api/v1/webhook", response_model=dict)
-async def webhook_message(payload: WebhookPayload):
-    """
-    Recebe mensagens do webhook do WhatsApp.
-
-    SEGURANÇA: Em produção, implementar verificação da assinatura do webhook (por exemplo, X-Hub-Signature da API do WhatsApp/Evolution) para evitar solicitações falsas (spoofing). Utilize validação de secret token antes de processar o payload.
-    """
-    command = payload.message.lower().strip()
-    response = route_command(command, payload.sender)
-    return {"status": "ok", "reply": response}
-
-def route_command(command: str, sender: str) -> str:
-    if command in ("help", "?", "comandos"):
-        return ("help_text")
-    if command in ("status", "status?"):
-        return ("system_online")
-    if command.startswith("forecast"):
-        return ("forecast_ready")
-    return ("comando_nao_entendido")
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
+        ) 
