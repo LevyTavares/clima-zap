@@ -43,10 +43,15 @@ async def lifespan(_: FastAPI):
         scheduler.shutdown()
 
 
+# --- 1. METADADOS DO SWAGGER UI ---
 app = FastAPI(
-    title="Clima-Zap API",
+    title="🌤️ Clima-Zap API",
     version="1.0.0",
-    description="API de monitoramento e alertas climáticos para o Cariri",
+    description=(
+        "API de monitoramento e alertas climáticos para o Cariri. "
+        "Focada em integração e automação via WhatsApp."
+    ),
+    contact={"name": "Equipe Clima-Zap"},
     lifespan=lifespan,
 )
 
@@ -59,25 +64,60 @@ app.add_middleware(
 )
 
 # Registra o roteador do webhook modularizado
-app.include_router(webhook_router)
+app.include_router(webhook_router, tags=["Webhook do WhatsApp"])
 
 
-@app.get("/")
-def health_check():
+# --- 2. DOCUMENTAÇÃO DAS ROTAS ---
+@app.get(
+    "/", 
+    tags=["Health Check"],
+    summary="Verifica o status raiz da API"
+)
+def root():
+    """
+    **Rota Raiz:** Confirma se o servidor principal está online.
+    """
     return {"status": "online", "projeto": "Clima-Zap APIEXT III"}
 
 
-@app.get("/health")
+@app.get(
+    "/health", 
+    tags=["Health Check"],
+    summary="Verificação detalhada de saúde"
+)
 async def health_check():
+    """
+    **Health Check:** Ponto de checagem para orquestradores (como o Docker Compose) 
+    garantirem que a API não travou em segundo plano.
+    """
     return {"status": "healthy"}
 
-@app.get("/api/v1/clima/ping")
+
+@app.get(
+    "/api/v1/clima/ping", 
+    tags=["Health Check"],
+    summary="Ping dos serviços de clima"
+)
 async def ping_clima():
+    """
+    Confirma se o submódulo de clima e formatação está pronto para operar.
+    """
     return {"mensagem": "Módulo de clima pronto para integração com Open-Meteo"}
 
 
-@app.get("/api/v1/clima/cariri")
+@app.get(
+    "/api/v1/clima/cariri",
+    tags=["Dados Climáticos"],
+    summary="Busca a previsão atual e alertas da região"
+)
 async def get_clima_cariri():
+    """
+    Consome a API da Open-Meteo em tempo real, processa as métricas 
+    atuais e já passa pelo motor de regras de negócio para gerar alertas.
+    
+    * **Retorna:** Um JSON contendo os dados brutos da previsão e a 
+    lista de alertas gerados.
+    """
     try:
         weather_info = await fetch_cariri_weather()
         current = (
@@ -95,4 +135,4 @@ async def get_clima_cariri():
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
-        ) 
+        )
