@@ -15,7 +15,7 @@ def test_root_endpoint():
     assert response.status_code == 200
     assert response.json() == {
         "status": "online",
-        "projeto": "Clima-Zap APIEXT III",
+        "project": "Clima-Zap",
     }
 
 
