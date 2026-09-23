@@ -308,7 +308,7 @@ WhatsApp User → Evolution API → Webhook → Clima-Zap → Evolution API → 
 |---------|----------|
 | `help`, `?`, `comandos`, `ajuda` | Texto de ajuda com a lista de comandos |
 | `status`, `status?` | Status da API + estado da instância WhatsApp |
-| `forecast`, `previsao`, `previsão`, `clima` | Resumo diário do clima + alertas ativos |
+| `forecast`, `previsao`, `previsão`, `previzao`, `previzão`, `clima` | Resumo diário do clima + alertas ativos |
 | Outro | Mensagem de comando não reconhecido |
 
 ### Payload de exemplo (webhook)
