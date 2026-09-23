@@ -4,7 +4,7 @@ import random
 def get_greeting() -> str:
     """Retorna uma saudação amigável e variada."""
     greetings = [
-        "Bom dia, pessoal! 🌵",
+        "Como vão pessoal? 🌵",
         "E aí, como estamos hoje? ☀️",
         "Passando com as atualizações do clima! 🌤️",
         "Olá! Aqui é o seu boletim diário do Clima-Zap 📱"
@@ -91,7 +91,7 @@ def format_period_summary(
     """Mensagem de boletim por período (manhã/tarde/noite) para WhatsApp."""
     uv_alert = "☀️" if uv_max < 6 else "🧴"
     uv_text = f"{uv_alert} *Índice UV (pico):* {uv_max} "
-    uv_text += "(_Muito Alto! Proteja-se_)" if uv_max >= 8 else "(_Tranquilo_)"
+    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_max >= 8 else "(_Tranquilo_)"
 
     # condição predominante = código mais frequente
     main_code = max(set(weather_codes), key=weather_codes.count) if weather_codes else 0
@@ -100,11 +100,11 @@ def format_period_summary(
     if rain_prob_max >= 70:
         health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
     elif uv_max >= 8:
-        health_tip = "_Dica: Sol forte! Protetor solar e óculos não podem faltar._ 😎"
+        health_tip = "_Dica: Sol muito forte! Protetor solar e óculos não podem faltar._ 😎"
     elif humidity_avg <= 30:
-        health_tip = "_Dica: Umidade baixa — beba bastante água._ 🚰"
+        health_tip = "_Dica: Umidade baixa, então beba bastante água._ 🚰"
     else:
-        health_tip = "_Dica: Clima agradável, aproveite!_ 🍃"
+        health_tip = "_Dica: Clima agradável, aproveite ao ar livre!_ 🍃"
 
     label = PERIOD_LABELS.get(period, period)
     window = PERIOD_WINDOWS.get(period, "")
@@ -129,7 +129,7 @@ def format_daily_summary(city: str, temp_min: float, temp_max: float, humidity: 
     # Lógica de Ícones e Alertas de UV
     uv_alert = "☀️" if uv_index < 6 else "🧴"
     uv_text = f"{uv_alert} *Índice UV:* {uv_index} "
-    uv_text += "(_Muito Alto! Proteja-se_)" if uv_index >= 8 else "(_Tranquilo_)"
+    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_index >= 8 else "(_Tranquilo_)"
 
     # Lógica de Dicas de Saúde e Rotina (Foco no clima regional)
     health_tip = ""

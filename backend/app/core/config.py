@@ -8,6 +8,7 @@ ROOT_ENV = ROOT_DIR / ".env"
 
 
 class Settings(BaseSettings):
+    # Application basics
     port: int = 8000
     environment: str = "development"
     default_city: str = "Juazeiro do Norte"

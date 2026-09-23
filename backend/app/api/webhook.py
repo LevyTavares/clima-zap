@@ -41,19 +41,19 @@ def extract_sender_jid(data: dict) -> str:
 
 HELP_TEXT = (
     "*🌤️ Clima-Zap — Comandos*\n\n"
-    "• *help* / *?* / *comandos* — esta lista\n"
-    "• *status* — estado do bot e conexão WhatsApp\n"
-    "• *forecast* / *previsão* — clima atual do Cariri\n\n"
+    "• ```?```/```ajuda``` — esta lista\n"
+    "• ```status``` — estado do bot e conexão WhatsApp\n"
+    "• ```previsão``` — clima atual do Cariri\n\n"
     "Envie qualquer uma dessas opções."
 )
 
 NOT_FOUND_TEXT = (
     "❓ *Comando não reconhecido*\n\n"
-    "Envie *help* para ver os comandos disponíveis."
+    "Envie ```?``` ou ```ajuda``` para ver os comandos disponíveis."
 )
 
 FORECAST_ERROR_TEXT = (
-    "⚠️ Não consegui buscar a previsão agora. Tente novamente em instantes."
+    "⚠️ Não consegui buscar a previsão agora. Tente novamente em alguns instantes ou contate os desenvolvedores."
 )
 
 
@@ -76,7 +76,7 @@ async def route_command(command: str, sender: str) -> str:
             f"• Instância: `{settings.evolution_instance_name or '-'}`"
         )
 
-    if command.startswith(("forecast", "previsao", "previsão", "clima")):
+    if command.startswith(("forecast", "previsao", "previsão", "previzao","previzão", "clima")):
         try:
             return await build_current_forecast()
         except Exception as e:

@@ -92,9 +92,9 @@ Evolution API sends POST to `/api/v1/webhook`:
 
 | Command | Response |
 |---------|----------|
-| `help`, `?`, `comandos` | Help text |
+| `help`, `?`, `comandos`, `ajuda` | Help text |
 | `status`, `status?` | System status |
-| `forecast` | Weather forecast |
+| `forecast`, `previsao`, `previsão`, `previzao`, `previzão`, `clima` | Weather forecast |
 | Other | Command not understood |
 
 ## Periodic Group Forecast
