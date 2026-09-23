@@ -1,7 +1,7 @@
 # 🌤️ Clima-Zap — WhatsApp Weather Alert Bot
 
 > **APIEXT III Project**
-> Sistema de monitoramento e alertas climáticos em tempo real para a região do Cariri (CE), consumindo a [Open-Meteo API](https://open-meteo.com) e integrado ao WhatsApp via [Evolution API](https://doc.evolution-api.com) para disparos preventivos.
+> Sistema de monitoramento e alertas climáticos em tempo real para a região do Cariri (CE - alterável), consumindo a [Open-Meteo API](https://open-meteo.com) e integrado ao WhatsApp via [Evolution API](https://doc.evolution-api.com) para disparos preventivos.
 
 **Repositório:** [github.com/LevyTavares/clima-zap](https://github.com/LevyTavares/clima-zap)
 
