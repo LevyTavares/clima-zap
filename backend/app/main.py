@@ -1,4 +1,6 @@
 import logging
+import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
 from app.services.alerts import generate_weather_alerts
+
+# docs live next to backend/ inside container: /app/../docs won't exist.
+# Prefer env override, fallback to repo-relative path (dev outside Docker).
+DOCS_DIR = Path(os.getenv("DOCS_DIR", Path(__file__).parent.parent.parent / "docs"))
 
 logger = logging.getLogger(__name__)
 ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
@@ -136,3 +142,33 @@ async def get_clima_cariri():
         raise HTTPException(
             status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
         )
+
+
+@app.get(
+    "/docs/whatsapp",
+    tags=["Documentação"],
+    summary="Documentação da integração WhatsApp"
+)
+async def whatsapp_docs():
+    """
+    Retorna documentação completa da integração WhatsApp com Evolution API.
+    """
+    docs_file = DOCS_DIR / "whatsapp-integration.md"
+    if not docs_file.exists():
+        raise HTTPException(status_code=404, detail="Documentação não encontrada")
+    return {"content": docs_file.read_text(encoding="utf-8")}
+
+
+@app.get(
+    "/docs/docker",
+    tags=["Documentação"],
+    summary="Documentação do setup Docker Compose"
+)
+async def docker_docs():
+    """
+    Retorna documentação do Docker Compose (back-end, front-end e Evolution API).
+    """
+    docs_file = DOCS_DIR / "docker-setup.md"
+    if not docs_file.exists():
+        raise HTTPException(status_code=404, detail="Documentação não encontrada")
+    return {"content": docs_file.read_text(encoding="utf-8")}

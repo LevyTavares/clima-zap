@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: clima-zap-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-evolution}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-evolution}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-evolution_pass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clima-zap-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: clima-zap-redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - clima-zap-net
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: clima-zap-evolution
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    environment:
+      - SERVER_URL=http://localhost:8080
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-changeme}
+      - AUTHENTICATION_EXPOSE_HEADERS=true
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://${POSTGRES_USERNAME:-evolution}:${POSTGRES_PASSWORD:-evolution_pass}@postgres:5432/${POSTGRES_DATABASE:-evolution}
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=false
+      - DATABASE_SAVE_MESSAGE_CONTACTS=false
+      - DATABASE_SAVE_MESSAGE_CHATS=false
+      - DATABASE_SAVE_MESSAGE_LABELS=false
+      - DATABASE_SAVE_MESSAGE_HISTORIC=false
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/6
+      - CACHE_REDIS_PREFIX_KEY=clima-zap
+      - CACHE_LOCAL_ENABLED=false
+      - WEBHOOK_GLOBAL_ENABLED=false
+      - WEBHOOK_GLOBAL_URL=http://backend:8000/api/v1/webhook
+    networks:
+      - clima-zap-net
+
+  backend:
+    build: ./backend
+    container_name: clima-zap-backend
+    restart: always
+    depends_on:
+      - evolution-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - ENVIRONMENT=development
+      - DEFAULT_CITY=Juazeiro do Norte
+      - DEFAULT_LATITUDE=-7.2128
+      - DEFAULT_LONGITUDE=-39.3151
+      - OPEN_METEO_URL=https://api.open-meteo.com/v1/forecast
+      - EVOLUTION_API_URL=http://evolution-api:8080
+      - DOCS_DIR=/docs
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY:-changeme}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-clima-zap}
+    volumes:
+      - ./docs:/docs:ro
+    networks:
+      - clima-zap-net
+
+  frontend:
+    build: ./frontend
+    container_name: clima-zap-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - clima-zap-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:
+
+networks:
+  clima-zap-net:
+    driver: bridge

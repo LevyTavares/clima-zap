@@ -9,11 +9,13 @@ async def fetch_cariri_weather() -> WeatherData:
         "latitude": -7.31, 
         "longitude": -39.31,
         "current": "temperature_2m,relative_humidity_2m,rain,uv_index",
+        "daily": "temperature_2m_max,temperature_2m_min",
+        "forecast_days": "1",
         "timezone": "America/Fortaleza"
     }
     
     # a requisição assíncrona
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(url, params=params)
         response.raise_for_status() # Lança um erro se o status não for 200 OK
         data = response.json()

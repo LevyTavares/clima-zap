@@ -8,3 +8,8 @@ backend/.env
 venv/
 __pycache__/
 *.pyc
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
