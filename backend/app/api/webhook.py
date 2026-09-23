@@ -1,11 +1,9 @@
 import logging
 import time
 from fastapi import APIRouter, status, BackgroundTasks
-from app.api.api import fetch_cariri_weather
 from app.core.config import settings
-from app.formatter import format_daily_summary
 from app.schemas.webhook import WebhookPayload
-from app.services.alerts import generate_weather_alerts
+from app.services.forecast import build_current_forecast
 from app.services.evolution_client import send_whatsapp_message
 from app.services.whatsapp_session import check_whatsapp_status
 
@@ -80,34 +78,7 @@ async def route_command(command: str, sender: str) -> str:
 
     if command.startswith(("forecast", "previsao", "previsão", "clima")):
         try:
-            w = await fetch_cariri_weather()
-            cur = w.current
-            temp_max = (
-                w.daily.temperature_2m_max[0]
-                if w.daily and w.daily.temperature_2m_max
-                else cur.temperature_2m
-            )
-            temp_min = (
-                w.daily.temperature_2m_min[0]
-                if w.daily and w.daily.temperature_2m_min
-                else cur.temperature_2m
-            )
-            summary = format_daily_summary(
-                city=settings.default_city,
-                temp_min=temp_min,
-                temp_max=temp_max,
-                humidity=int(cur.relative_humidity_2m),
-                uv_index=cur.uv_index,
-                rain_prob=int(cur.rain * 100),
-            )
-            alerts = generate_weather_alerts(
-                uv_index=cur.uv_index,
-                humidity=cur.relative_humidity_2m,
-                rain_prob=int(cur.rain * 100),
-            )
-            if alerts:
-                summary += "\n\n" + "\n".join(alerts)
-            return summary
+            return await build_current_forecast()
         except Exception as e:
             logger.error(f"Erro ao buscar previsão: {e}")
             return FORECAST_ERROR_TEXT
@@ -153,13 +124,17 @@ async def process_event_background(payload: WebhookPayload):
     response = await route_command(message_text.lower().strip(), sender)
     logger.info(f"Resposta ({len(response)} chars): {response[:80]!r}...")
 
-    # send_text expects plain number (e.g. '558897169894'), not full JID
-    number = sender.split("@")[0]
+    # DM: strip JID suffix (send_text expects plain number).
+    # Group (@g.us): keep full JID so reply lands in the group.
+    if sender.endswith("@g.us"):
+        target = sender
+    else:
+        target = sender.split("@")[0]
     try:
-        result = await send_whatsapp_message(number, response)
-        logger.info(f"Enviado para {number}: {result}")
+        result = await send_whatsapp_message(target, response)
+        logger.info(f"Enviado para {target}: {result}")
     except Exception as e:
-        logger.error(f"Erro ao enviar resposta para {number}: {e}")
+        logger.error(f"Erro ao enviar resposta para {target}: {e}")
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks):

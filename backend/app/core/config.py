@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     evolution_instance_name: str = ""
     target_phone_number: str = ""
     default_city: str = "Juazeiro do Norte"
+    forecast_group_jid: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

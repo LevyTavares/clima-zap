@@ -6,11 +6,12 @@ async def fetch_cariri_weather() -> WeatherData:
     
     # Coordenadas aproximadas do Cariri (Barbalha/Juazeiro do Norte)
     params = {
-        "latitude": -7.31, 
+        "latitude": -7.31,
         "longitude": -39.31,
         "current": "temperature_2m,relative_humidity_2m,rain,uv_index",
         "daily": "temperature_2m_max,temperature_2m_min",
-        "forecast_days": "1",
+        "hourly": "temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code",
+        "forecast_days": "2",
         "timezone": "America/Fortaleza"
     }
     

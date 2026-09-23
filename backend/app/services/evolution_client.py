@@ -23,9 +23,10 @@ def format_phone_jid(phone: str) -> str:
 async def send_whatsapp_message(number: str, message: str) -> dict:
     """Send text message via Evolution API.
 
-    number: plain digits with country code (e.g. '558897169894').
-            Full JID also accepted — stripped here.
+    number: plain digits with country code (e.g. '558897169894'),
+            or full group JID ending in '@g.us' (kept as-is).
     """
-    number = number.split("@")[0]
+    if "@g.us" not in number:
+        number = number.split("@")[0]
     client = get_evolution_client()
     return client.send_text(number, message)

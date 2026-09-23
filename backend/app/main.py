@@ -8,7 +8,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
+from app.core.config import settings
 from app.services.alerts import generate_weather_alerts
+from app.services.evolution_client import send_whatsapp_message
+from app.services.forecast import Period, build_period_forecast
 
 # docs live next to backend/ inside container: /app/../docs won't exist.
 # Prefer env override, fallback to repo-relative path (dev outside Docker).
@@ -17,6 +20,14 @@ DOCS_DIR = Path(os.getenv("DOCS_DIR", Path(__file__).parent.parent.parent / "doc
 logger = logging.getLogger(__name__)
 ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
 scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
+
+# Boletim periódico: manhã / tarde / noite — jitter 0–15min anti-spam
+FORECAST_PERIOD_JOBS: list[tuple[str, int, Period]] = [
+    ("forecast_morning", 6, "morning"),
+    ("forecast_afternoon", 14, "afternoon"),
+    ("forecast_night", 20, "night"),
+]
+FORECAST_JITTER_SECONDS = 900  # 15min
 
 
 async def process_scheduled_weather_alerts() -> None:
@@ -32,6 +43,49 @@ async def process_scheduled_weather_alerts() -> None:
         logger.warning("Alerta climático programado: %s", alert)
 
 
+async def send_period_forecast(period: Period) -> None:
+    """Busca boletim do período e envia para FORECAST_GROUP_JID."""
+    log = logging.getLogger("uvicorn.error")
+    group_jid = settings.forecast_group_jid
+    if not group_jid:
+        log.warning("FORECAST_GROUP_JID vazio — forecast %s pulado", period)
+        return
+    try:
+        message = await build_period_forecast(period)
+    except Exception as e:
+        log.error("Erro ao montar forecast %s: %s", period, e)
+        return
+    try:
+        result = await send_whatsapp_message(group_jid, message)
+        log.warning("Forecast %s enviado para %s: %s", period, group_jid, result)
+    except Exception as e:
+        log.error("Erro ao enviar forecast %s para %s: %s", period, group_jid, e)
+
+
+def register_forecast_jobs() -> None:
+    """Registra os 3 jobs de boletim — só se grupo configurado."""
+    # uvicorn.error shows in container logs (app.main INFO is swallowed)
+    log = logging.getLogger("uvicorn.error")
+    if not settings.forecast_group_jid:
+        log.warning("FORECAST_GROUP_JID vazio — jobs de forecast periódico não registrados")
+        return
+    for job_id, hour, period in FORECAST_PERIOD_JOBS:
+        scheduler.add_job(
+            send_period_forecast,
+            trigger="cron",
+            hour=hour,
+            minute=0,
+            jitter=FORECAST_JITTER_SECONDS,
+            kwargs={"period": period},
+            id=job_id,
+            replace_existing=True,
+        )
+    log.warning(
+        "Forecast periódico ativo: 3 jobs (06/14/20h ±15min) → %s",
+        settings.forecast_group_jid,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     scheduler.add_job(
@@ -42,6 +96,7 @@ async def lifespan(_: FastAPI):
         id="scheduled_weather_alerts",
         replace_existing=True,
     )
+    register_forecast_jobs()
     scheduler.start()
     try:
         yield
