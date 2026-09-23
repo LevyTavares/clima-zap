@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -8,14 +7,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
-from app.core.config import settings
+from app.core.config import ROOT_DIR, settings
 from app.services.alerts import generate_weather_alerts
 from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
 
-# docs live next to backend/ inside container: /app/../docs won't exist.
-# Prefer env override, fallback to repo-relative path (dev outside Docker).
-DOCS_DIR = Path(os.getenv("DOCS_DIR", Path(__file__).parent.parent.parent / "docs"))
+# Prefer DOCS_DIR (.env / Docker mount at /docs); fallback to repo docs/ (dev).
+DOCS_DIR = Path(settings.docs_dir) if settings.docs_dir else ROOT_DIR / "docs"
 
 logger = logging.getLogger(__name__)
 ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]

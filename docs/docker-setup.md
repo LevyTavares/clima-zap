@@ -19,9 +19,8 @@ Run whole Clima-Zap stack with one command.
 ## Quick Start
 
 ```bash
-# 1. Copy env templates
+# 1. Copy env template (single file at repo root)
 cp .env.example .env
-cp backend/.env.example backend/.env
 
 # 2. Edit secrets in .env (change EVOLUTION_API_KEY + passwords)
 #    Optional: FORECAST_GROUP_JID=120363...@g.us → 3x/day group bulletin
