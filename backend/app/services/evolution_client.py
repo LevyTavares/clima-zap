@@ -2,16 +2,17 @@
 Evolution API client for WhatsApp integration.
 Uses evolution-whatsapp package for sending/receiving messages.
 """
-import os
 from evolution_api import EvoClient, jid
+
+from app.core.config import settings
 
 
 def get_evolution_client() -> EvoClient:
-    """Get Evolution API client from env vars."""
+    """Get Evolution API client from settings (.env at repo root)."""
     return EvoClient(
-        base_url=os.getenv("EVOLUTION_API_URL", "http://localhost:8080"),
-        api_key=os.getenv("EVOLUTION_API_KEY", ""),
-        instance=os.getenv("EVOLUTION_INSTANCE_NAME", ""),
+        base_url=settings.evolution_api_url,
+        api_key=settings.evolution_api_key,
+        instance=settings.evolution_instance_name,
     )
 
 

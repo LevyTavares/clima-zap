@@ -57,10 +57,10 @@ curl -X POST "http://localhost:8080/webhook/set/clima-zap" \
 
 ### 4. Environment Variables
 
-Add to `backend/.env` (local) — for Docker Compose, set `FORECAST_GROUP_JID` in root `.env`:
+Set everything in the root `.env` (copied from `.env.example`) — used by Docker Compose and the backend:
 
 ```bash
-EVOLUTION_API_URL="http://localhost:8080"
+EVOLUTION_API_URL="http://localhost:8080"  # Docker overrides to http://evolution-api:8080
 EVOLUTION_API_KEY="your_secure_api_key"
 EVOLUTION_INSTANCE_NAME="clima-zap"
 FORECAST_GROUP_JID="120363xxxxxxxxxx@g.us"  # optional: group periodic bulletin

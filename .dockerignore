@@ -5,7 +5,6 @@ __pycache__
 *.pyc
 .env
 *.env
-backend/.env
 backend/tests
 frontend
 docs

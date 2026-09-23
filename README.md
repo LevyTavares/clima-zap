@@ -88,8 +88,8 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 
 ```text
 clima-zap/
-├── .env                          # Segredos do Docker Compose (gitignored)
-├── .env.example                  # Template de segredos do Compose
+├── .env                          # Segredos Compose + backend (gitignored)
+├── .env.example                  # Template único de env (Compose + backend)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                # Pipeline CI (Pytest, Python 3.11)
@@ -104,7 +104,6 @@ clima-zap/
 │   └── whatsapp-integration.md   # Guia da integração WhatsApp
 ├── backend/
 │   ├── .dockerignore
-│   ├── .env.example              # Template de env do backend
 │   ├── Dockerfile                # python:3.11-slim
 │   ├── app/
 │   │   ├── main.py               # App FastAPI, CORS, APScheduler, rotas
@@ -153,9 +152,8 @@ clima-zap/
 ### Subindo a stack completa
 
 ```bash
-# 1. Copiar templates de env
+# 1. Copiar template de env (único, na raiz)
 cp .env.example .env
-cp backend/.env.example backend/.env
 
 # 2. Editar segredos (.env) — trocar EVOLUTION_API_KEY e senhas
 #    Opcional: FORECAST_GROUP_JID=120363...@g.us ativa boletim 3×/dia no grupo
@@ -231,7 +229,7 @@ npm install
 npm run dev
 ```
 
-> Fora do Docker, ajuste `EVOLUTION_API_URL=http://localhost:8080` no `backend/.env`.
+> Fora do Docker, `EVOLUTION_API_URL` já aponta para `http://localhost:8080` no `.env` da raiz (o backend local carrega esse arquivo automaticamente).
 
 ### Scripts do Frontend
 
@@ -359,34 +357,28 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 
 ## ⚙️ Variáveis de Ambiente
 
-### Raiz (`.env` — Docker Compose)
+### Raiz (`.env` — Docker Compose + backend)
+
+Único template: `.env.example` → `.env`. Docker Compose e o backend (pydantic-settings) leem o mesmo arquivo.
 
 | Variável | Default | Descrição |
 |----------|---------|-----------|
-| `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
-| `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância WhatsApp |
-| `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Passado ao container via `docker-compose.yml` |
-| `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
-| `POSTGRES_USERNAME` | `evolution` | Usuário do PostgreSQL |
-| `POSTGRES_PASSWORD` | `evolution_pass` | Senha do PostgreSQL |
-
-### Backend (`backend/.env`)
-
-| Variável | Default | Descrição |
-|----------|---------|-----------|
-| `PORT` | `8000` | Porta da API |
+| `PORT` | `8000` | Porta da API (host e container) |
 | `ENVIRONMENT` | `development` | Ambiente de execução |
 | `DEFAULT_CITY` | `Juazeiro do Norte` | Cidade padrão |
 | `DEFAULT_LATITUDE` | `-7.2128` | Latitude padrão |
 | `DEFAULT_LONGITUDE` | `-39.3151` | Longitude padrão |
 | `OPEN_METEO_URL` | `https://api.open-meteo.com/v1/forecast` | URL do Open-Meteo |
-| `EVOLUTION_API_URL` | `http://evolution-api:8080` (Docker) / `http://localhost:8080` (local) | URL da Evolution API |
-| `EVOLUTION_API_KEY` | `changeme` | Chave da Evolution API |
-| `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância |
+| `EVOLUTION_API_URL` | `http://localhost:8080` (local) / `http://evolution-api:8080` (Docker, override no compose) | URL da Evolution API |
+| `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
+| `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância WhatsApp |
 | `TARGET_PHONE_NUMBER` | *(vazio)* | Número alvo (broadcast — não utilizado ainda) |
-| `FORECAST_GROUP_JID` | *(vazio)* | JID do grupo WhatsApp (`...@g.us`) que recebe o boletim 3×/dia. Vazio = jobs de forecast periódico desativados |
-| `DOCS_DIR` | `../docs` (dev) / `/docs` (Docker) | Diretório da documentação markdown |
-| `PYTHONPATH` | `.` | Necessário para rodar pytest de `backend/` |
+| `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Vazio = jobs desativados |
+| `DOCS_DIR` | *(vazio → `docs/` da raiz)* / `/docs` (Docker) | Diretório da documentação markdown |
+| `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
+| `POSTGRES_USERNAME` | `evolution` | Usuário do PostgreSQL |
+| `POSTGRES_PASSWORD` | `evolution_pass` | Senha do PostgreSQL |
+| `PYTHONPATH` | `.` | Necessário para rodar pytest de `backend/` (não vai no `.env`) |
 
 ### Frontend
 
