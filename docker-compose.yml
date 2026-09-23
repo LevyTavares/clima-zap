@@ -64,7 +64,9 @@ services:
       - clima-zap-net
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: clima-zap-backend
     restart: always
     depends_on:

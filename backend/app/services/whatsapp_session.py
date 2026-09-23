@@ -19,4 +19,4 @@ async def check_whatsapp_status() -> dict:
             response.raise_for_status()
             return response.json()
     except (httpx.HTTPError, httpx.TimeoutException):
-        return {"instance": {"state": "DISCONNECTED"}}
+        return {"state": "DISCONNECTED"}
