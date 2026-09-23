@@ -24,6 +24,7 @@ cp .env.example .env
 cp backend/.env.example backend/.env
 
 # 2. Edit secrets in .env (change EVOLUTION_API_KEY + passwords)
+#    Optional: FORECAST_GROUP_JID=120363...@g.us → 3x/day group bulletin
 vim .env
 
 # 3. Build & start

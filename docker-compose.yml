@@ -84,6 +84,7 @@ services:
       - DOCS_DIR=/docs
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY:-changeme}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-clima-zap}
+      - FORECAST_GROUP_JID=${FORECAST_GROUP_JID:-}
     volumes:
       - ./docs:/docs:ro
     networks:

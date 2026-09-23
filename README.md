@@ -31,14 +31,15 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Previsão em tempo real** da região do Cariri com geração de alertas (`/api/v1/clima/cariri`)
 - **Motor de regras** de alerta preventivo (UV, umidade, chuva) com mensagens formatadas em Markdown de WhatsApp
 - **Alertas agendados** via APScheduler — 6 verificações diárias (06h, 08h, 12h, 14h, 16h, 18h — fuso `America/Fortaleza`)
+- **Boletim periódico no grupo WhatsApp** — 3×/dia (manhã 06h, tarde 14h, noite 20h) com jitter 0–15min, alvo via `FORECAST_GROUP_JID`
 - **Webhook do WhatsApp** (`POST /api/v1/webhook`) com processamento assíncrono (`BackgroundTasks`), normalização de eventos e deduplicação de mensagens (TTL 5 min)
-- **Bot de WhatsApp** com comandos: `help`, `status`, `forecast`
+- **Bot de WhatsApp** com comandos: `help`, `status`, `forecast` (DM e grupo)
 - **Envio de mensagens** pelo WhatsApp via Evolution API (SDK `evolution-whatsapp`)
 - **Verificação de sessão** do WhatsApp (`/instance/connectionState`)
 - **Formatadores de mensagem** (resumo diário, alerta urgente, saudações aleatórias)
 - **Documentação servida pela API** (`/docs/whatsapp`, `/docs/docker`) além do Swagger automático
 - **Stack Docker Compose completa** — PostgreSQL + Redis + Evolution API + Backend + Frontend
-- **CI com GitHub Actions** executando a suíte de testes (14 testes)
+- **CI com GitHub Actions** executando a suíte de testes (26 testes)
 
 ---
 
@@ -114,16 +115,18 @@ clima-zap/
 │   │   ├── core/
 │   │   │   └── config.py         # Settings (pydantic-settings)
 │   │   ├── schemas/
-│   │   │   ├── schemas.py        # WeatherData / CurrentWeather / DailyWeather
+│   │   │   ├── schemas.py        # WeatherData / CurrentWeather / DailyWeather / HourlyWeather
 │   │   │   └── webhook.py        # WebhookPayload
 │   │   └── services/
 │   │       ├── alerts.py         # generate_weather_alerts (3 regras)
 │   │       ├── evolution_client.py    # Envio via Evolution API (EvoClient)
+│   │       ├── forecast.py            # Builders on-demand e por período (manhã/tarde/noite)
 │   │       └── whatsapp_session.py    # Verificação de connectionState
 │   ├── test/                     # Testes legados (health)
-│   └── tests/                    # Suíte principal (14 testes)
+│   └── tests/                    # Suíte principal (26 testes)
 │       ├── conftest.py
 │       ├── test_alerts.py
+│       ├── test_forecast.py
 │       ├── test_main.py
 │       └── test_whatsapp_session.py
 └── frontend/
@@ -155,6 +158,7 @@ cp .env.example .env
 cp backend/.env.example backend/.env
 
 # 2. Editar segredos (.env) — trocar EVOLUTION_API_KEY e senhas
+#    Opcional: FORECAST_GROUP_JID=120363...@g.us ativa boletim 3×/dia no grupo
 vim .env
 
 # 3. Build e start
@@ -281,14 +285,14 @@ npm run preview   # Preview do build
 ### Integração Open-Meteo
 
 - **Endpoint:** `GET https://api.open-meteo.com/v1/forecast` (sem API key)
-- **Parâmetros:** `latitude=-7.31`, `longitude=-39.31`, `current=temperature_2m,relative_humidity_2m,rain,uv_index`, `daily=temperature_2m_max,temperature_2m_min`, `forecast_days=1`, `timezone=America/Fortaleza`
+- **Parâmetros:** `latitude=-7.31`, `longitude=-39.31`, `current=temperature_2m,relative_humidity_2m,rain,uv_index`, `daily=temperature_2m_max,temperature_2m_min`, `hourly=temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code`, `forecast_days=2`, `timezone=America/Fortaleza`
 - **Cliente:** `httpx.AsyncClient` com timeout de 10s, resposta validada pelo modelo Pydantic `WeatherData`
 
 ### Fluxo do Scheduler
 
 - `AsyncIOScheduler` com fuso `America/Fortaleza`
-- Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0)
-- Busca o clima, gera alertas e registra via `logger.warning` (envio ao WhatsApp ainda não está ligado ao scheduler)
+- Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, **apenas loga** (`logger.warning`)
+- Jobs `forecast_morning` / `forecast_afternoon` / `forecast_night`: horas `6, 14, 20`, `jitter=900` (0–15min) — montam boletim por período e **enviam** para `FORECAST_GROUP_JID` (só registram se o JID estiver setado)
 
 ---
 
@@ -361,6 +365,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 |----------|---------|-----------|
 | `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
 | `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância WhatsApp |
+| `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Passado ao container via `docker-compose.yml` |
 | `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
 | `POSTGRES_USERNAME` | `evolution` | Usuário do PostgreSQL |
 | `POSTGRES_PASSWORD` | `evolution_pass` | Senha do PostgreSQL |
@@ -379,6 +384,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | `EVOLUTION_API_KEY` | `changeme` | Chave da Evolution API |
 | `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância |
 | `TARGET_PHONE_NUMBER` | *(vazio)* | Número alvo (broadcast — não utilizado ainda) |
+| `FORECAST_GROUP_JID` | *(vazio)* | JID do grupo WhatsApp (`...@g.us`) que recebe o boletim 3×/dia. Vazio = jobs de forecast periódico desativados |
 | `DOCS_DIR` | `../docs` (dev) / `/docs` (Docker) | Diretório da documentação markdown |
 | `PYTHONPATH` | `.` | Necessário para rodar pytest de `backend/` |
 
@@ -434,11 +440,12 @@ cd backend
 PYTHONPATH=. python -m pytest
 ```
 
-**14 testes**, todos passando:
+**26 testes**, todos passando:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_main.py` | 5 | Endpoint raiz, ping de clima, registro do scheduler, job agendado, endpoint `/api/v1/clima/cariri` |
+| `tests/test_main.py` | 10 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` |
+| `tests/test_forecast.py` | 10 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |
 | `tests/test_whatsapp_session.py` | 2 | `connectionState` (sucesso e erro de conexão) |
 | `test/test_health.py` | 2 | `/` online e `/health` healthy (legado) |
@@ -473,7 +480,8 @@ Pipeline **Clima-Zap CI Pipeline** (`.github/workflows/ci.yml`):
 
 ## 🗺️ Roadmap / Não implementado
 
-- [ ] Envio real de alertas agendados ao WhatsApp (scheduler hoje apenas loga)
+- [x] Boletim periódico 3×/dia no grupo (`FORECAST_GROUP_JID` — manhã 06h, tarde 14h, noite 20h, jitter 0–15min)
+- [ ] Envio real de alertas agendados ao WhatsApp (job de alertas ainda apenas loga)
 - [ ] Verificação de assinatura do webhook (`X-Hub-Signature`) em produção
 - [ ] UI do frontend com dados climáticos em tempo real (componente hoje é placeholder)
 - [ ] Estilos SCSS modulares (`*.module.scss` + `_variables.scss`)
