@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
+from app.api.subscription import router as subscription_router
 from app.core.config import ROOT_DIR, settings
 from app.services.alerts import generate_weather_alerts
 from app.services.evolution_client import send_whatsapp_message
@@ -62,7 +63,6 @@ async def send_period_forecast(period: Period) -> None:
 
 def register_forecast_jobs() -> None:
     """Registra os 3 jobs de boletim — só se grupo configurado."""
-    # uvicorn.error shows in container logs (app.main INFO is swallowed)
     log = logging.getLogger("uvicorn.error")
     if not settings.forecast_group_jid:
         log.warning("FORECAST_GROUP_JID vazio — jobs de forecast periódico não registrados")
@@ -122,8 +122,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registra o roteador do webhook modularizado
+# Registra os roteadores modularizados
 app.include_router(webhook_router, tags=["Webhook do WhatsApp"])
+app.include_router(subscription_router, tags=["Gestão de Inscrições"])
 
 
 # --- 2. DOCUMENTAÇÃO DAS ROTAS ---
@@ -136,7 +137,7 @@ def root():
     """
     **Rota Raiz:** Confirma se o servidor principal está online.
     """
-    return {"status": "online", "projeto": "Clima-Zap APIEXT III"}
+    return {"status": "online", "project": "Clima-Zap"}
 
 
 @app.get(
@@ -146,8 +147,7 @@ def root():
 )
 async def health_check():
     """
-    **Health Check:** Ponto de checagem para orquestradores (como o Docker Compose) 
-    garantirem que a API não travou em segundo plano.
+    **Health Check:** Ponto de checagem para orquestradores (como o Docker Compose).
     """
     return {"status": "healthy"}
 
@@ -171,11 +171,7 @@ async def ping_clima():
 )
 async def get_clima_cariri():
     """
-    Consome a API da Open-Meteo em tempo real, processa as métricas 
-    atuais e já passa pelo motor de regras de negócio para gerar alertas.
-    
-    * **Retorna:** Um JSON contendo os dados brutos da previsão e a 
-    lista de alertas gerados.
+    Consome a API da Open-Meteo em tempo real e gera alertas baseados nas regras de negócio.
     """
     try:
         weather_info = await fetch_cariri_weather()
@@ -203,9 +199,6 @@ async def get_clima_cariri():
     summary="Documentação da integração WhatsApp"
 )
 async def whatsapp_docs():
-    """
-    Retorna documentação completa da integração WhatsApp com Evolution API.
-    """
     docs_file = DOCS_DIR / "whatsapp-integration.md"
     if not docs_file.exists():
         raise HTTPException(status_code=404, detail="Documentação não encontrada")
@@ -218,9 +211,6 @@ async def whatsapp_docs():
     summary="Documentação do setup Docker Compose"
 )
 async def docker_docs():
-    """
-    Retorna documentação do Docker Compose (back-end, front-end e Evolution API).
-    """
     docs_file = DOCS_DIR / "docker-setup.md"
     if not docs_file.exists():
         raise HTTPException(status_code=404, detail="Documentação não encontrada")
