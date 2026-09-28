@@ -7,6 +7,7 @@
 venv/
 __pycache__/
 *.pyc
+*.db
 
 # Frontend
 node_modules/

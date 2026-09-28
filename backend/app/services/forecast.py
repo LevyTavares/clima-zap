@@ -63,6 +63,23 @@ def _period_date_ranges(period: Period, today: date) -> list[tuple[date, int, in
     return [(today, start, end)]
 
 
+def _matching_hour_indices(
+    times: list[str], wanted: list[tuple[date, int, int]]
+) -> list[int]:
+    indices = []
+    for index, time_value in enumerate(times):
+        try:
+            hour = datetime.fromisoformat(time_value)
+        except ValueError:
+            continue
+        if any(
+            hour.date() == day and start <= hour.hour < end
+            for day, start, end in wanted
+        ):
+            indices.append(index)
+    return indices
+
+
 def aggregate_period_hourly(hourly, period: Period, now: datetime | None = None) -> dict | None:
     """Agrega arrays horários do Open-Meteo no janela do período.
 
@@ -74,37 +91,22 @@ def aggregate_period_hourly(hourly, period: Period, now: datetime | None = None)
     if not times:
         return None
 
-    temps: list[float] = hourly.temperature_2m
-    pops: list[float] = hourly.precipitation_probability
-    hums: list[float] = hourly.relative_humidity_2m
-    uvs: list[float] = hourly.uv_index
-    codes: list[int] = hourly.weather_code
-
     wanted = _period_date_ranges(period, now.date())
-    selected_temps: list[float] = []
-    selected_pops: list[float] = []
-    selected_hums: list[float] = []
-    selected_uvs: list[float] = []
-    selected_codes: list[int] = []
-
-    for idx, t in enumerate(times):
-        try:
-            dt = datetime.fromisoformat(t)
-        except ValueError:
-            continue
-        for day, h_start, h_end in wanted:
-            if dt.date() == day and h_start <= dt.hour < h_end:
-                if idx < len(temps):
-                    selected_temps.append(temps[idx])
-                if idx < len(pops):
-                    selected_pops.append(pops[idx])
-                if idx < len(hums):
-                    selected_hums.append(hums[idx])
-                if idx < len(uvs):
-                    selected_uvs.append(uvs[idx])
-                if idx < len(codes):
-                    selected_codes.append(codes[idx])
-                break
+    selected_indices = _matching_hour_indices(times, wanted)
+    hourly_values = (
+        hourly.temperature_2m,
+        hourly.precipitation_probability,
+        hourly.relative_humidity_2m,
+        hourly.uv_index,
+        hourly.weather_code,
+    )
+    selected_values = [
+        [values[index] for index in selected_indices if index < len(values)]
+        for values in hourly_values
+    ]
+    selected_temps, selected_pops, selected_hums, selected_uvs, selected_codes = (
+        selected_values
+    )
 
     if not selected_temps and not selected_codes:
         return None

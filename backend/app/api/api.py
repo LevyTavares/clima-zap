@@ -3,7 +3,7 @@ from app.core.config import settings
 from app.schemas.schemas import WeatherData
 
 async def fetch_cariri_weather() -> WeatherData:
-    # Coordenadas aproximadas do Cariri (Barbalha/Juazeiro do Norte)
+    # Coordenadas configuráveis; o padrão aponta para o bairro Triângulo.
     params = {
         "latitude": settings.default_latitude,
         "longitude": settings.default_longitude,
