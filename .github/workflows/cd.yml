@@ -1,0 +1,42 @@
+name: Clima-Zap CD
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy para Render
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RENDER_SERVICE_URL: ${{ secrets.RENDER_SERVICE_URL }}
+    steps:
+      - name: Disparar deploy
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Verificar configuração de deploy
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
+        run: |
+          echo "RENDER_DEPLOY_HOOK_URL não configurado."
+          echo "Crie esse segredo no environment production para ativar o CD."
+          exit 1
+
+      - name: Aguardar serviço saudável
+        if: ${{ env.RENDER_SERVICE_URL != '' }}
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent "${RENDER_SERVICE_URL}/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Serviço não ficou saudável dentro do prazo."
+          exit 1
