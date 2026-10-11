@@ -1,17 +1,22 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from evolution_api import EvolutionError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
 from app.api.subscription import router as subscription_router
 from app.core.config import ROOT_DIR, settings
 from app.services.alerts import generate_weather_alerts
+from app.services.alert_history import record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
+from app.services.weather_dispatch import dispatch_weather_alerts
 
 # Prefer DOCS_DIR (.env / Docker mount at /docs); fallback to repo docs/ (dev).
 DOCS_DIR = Path(settings.docs_dir) if settings.docs_dir else ROOT_DIR / "docs"
@@ -40,6 +45,7 @@ async def process_scheduled_weather_alerts() -> None:
 
     for alert in alerts:
         logger.warning("Alerta climático programado: %s", alert)
+    await dispatch_weather_alerts(alerts)
 
 
 async def send_period_forecast(period: Period) -> None:
@@ -51,14 +57,25 @@ async def send_period_forecast(period: Period) -> None:
         return
     try:
         message = await build_period_forecast(period)
-    except Exception as e:
+    except (httpx.HTTPError, ValueError) as e:
         log.error("Erro ao montar forecast %s: %s", period, e)
         return
     try:
         result = await send_whatsapp_message(group_jid, message)
         log.warning("Forecast %s enviado para %s: %s", period, group_jid, result)
-    except Exception as e:
+    except EvolutionError as e:
         log.error("Erro ao enviar forecast %s para %s: %s", period, group_jid, e)
+        try:
+            await record_alert_dispatch(f"forecast_{period}", group_jid, "failed")
+        except SQLAlchemyError as log_error:
+            log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
+        return
+
+    delivery_status = result.get("status", "sent") if isinstance(result, dict) else "sent"
+    try:
+        await record_alert_dispatch(f"forecast_{period}", group_jid, str(delivery_status))
+    except SQLAlchemyError as log_error:
+        log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
 
 
 def register_forecast_jobs() -> None:
@@ -187,10 +204,10 @@ async def get_clima_cariri():
         alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
 
         return {"weather": weather_info, "alerts": alerts}
-    except Exception as e:
+    except (httpx.HTTPError, ValueError) as e:
         raise HTTPException(
             status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
-        )
+        ) from e
 
 
 @app.get(

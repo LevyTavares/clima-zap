@@ -9,7 +9,7 @@
 
 ## 📌 Sobre o Projeto
 
-O **Clima-Zap** coleta dados meteorológicos precisos (temperatura, umidade, precipitação e índice UV) da região do Cariri (coordenadas `-7.31, -39.31` — Barbalha/Juazeiro do Norte), analisa regras de prevenção urbana em tempo real e dispara alertas via WhatsApp para manter os usuários informados e protegidos.
+O **Clima-Zap** coleta dados meteorológicos precisos (temperatura, umidade, precipitação e índice UV) do bairro Triângulo, em Juazeiro do Norte (coordenadas padrão `-7.229711, -39.3300014`), analisa regras de prevenção urbana em tempo real e dispara alertas via WhatsApp para manter os usuários informados e protegidos.
 
 O sistema opera de forma **full-stack**: uma API REST FastAPI consome o Open-Meteo, um bot de WhatsApp recebe comandos por mensagem de texto e um frontend React (SPA) expõe a interface web. Toda a infraestrutura (banco, cache, WhatsApp, backend e frontend) sobe com **um único comando** via Docker Compose.
 
@@ -39,7 +39,8 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Formatadores de mensagem** (resumo diário, alerta urgente, saudações aleatórias)
 - **Documentação servida pela API** (`/docs/whatsapp`, `/docs/docker`) além do Swagger automático
 - **Stack Docker Compose completa** — PostgreSQL + Redis + Evolution API + Backend + Frontend
-- **CI com GitHub Actions** executando a suíte de testes (26 testes)
+- **CI com GitHub Actions** executando a suíte de testes
+- **Persistência de assinantes e alertas** com SQLAlchemy assíncrono, SQLite/PostgreSQL e migrations Alembic
 
 ---
 
@@ -55,6 +56,8 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 | Cliente HTTP Assíncrono | httpx 0.28.1 |
 | Scheduler | APScheduler 3.11.0 |
 | Integração WhatsApp | evolution-whatsapp 0.1.1 |
+| ORM / Migrações | SQLAlchemy 2 + Alembic |
+| Driver de banco | aiosqlite / asyncpg |
 | Servidor ASGI | Uvicorn 0.52.4 |
 | Testes | Pytest 8.4.2 |
 | Variáveis de Ambiente | python-dotenv 1.2.3 |
@@ -78,7 +81,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 | Provedor WhatsApp | Evolution API v2.3.7 (`evoapicloud/evolution-api`) |
 | Reverse Proxy (frontend) | nginx 1.27 |
 | CI/CD | GitHub Actions |
-| Banco de Dados (planejado) | Neon / Supabase |
+| Banco de Dados (aplicação) | SQLite local / PostgreSQL via SQLAlchemy |
 | Hospedagem backend (planejada) | Render |
 | Provedor Metereológico | Open-Meteo API (sem API key) |
 
@@ -107,6 +110,8 @@ clima-zap/
 │   ├── Dockerfile                # python:3.11-slim
 │   ├── app/
 │   │   ├── main.py               # App FastAPI, CORS, APScheduler, rotas
+│   │   ├── db/                   # Engine e sessões assíncronas
+│   │   ├── models.py             # Subscribers e AlertLogs
 │   │   ├── formatter.py          # Formatares de mensagem WhatsApp
 │   │   ├── api/
 │   │   │   ├── api.py            # Cliente Open-Meteo (fetch_cariri_weather)
@@ -118,11 +123,13 @@ clima-zap/
 │   │   │   └── webhook.py        # WebhookPayload
 │   │   └── services/
 │   │       ├── alerts.py         # generate_weather_alerts (3 regras)
+│   │       ├── alert_history.py  # Persistência do resultado de envios
 │   │       ├── evolution_client.py    # Envio via Evolution API (EvoClient)
 │   │       ├── forecast.py            # Builders on-demand e por período (manhã/tarde/noite)
 │   │       └── whatsapp_session.py    # Verificação de connectionState
 │   ├── test/                     # Testes legados (health)
-│   └── tests/                    # Suíte principal (26 testes)
+│   ├── alembic/                  # Histórico versionado de schema
+│   └── tests/                    # Suíte principal
 │       ├── conftest.py
 │       ├── test_alerts.py
 │       ├── test_forecast.py
@@ -261,8 +268,8 @@ npm run preview   # Preview do build
 ```json
 {
   "weather": {
-    "latitude": -7.31,
-    "longitude": -39.31,
+    "latitude": -7.229711,
+    "longitude": -39.3300014,
     "current": {
       "temperature_2m": 31.4,
       "relative_humidity_2m": 45.0,
@@ -283,13 +290,13 @@ npm run preview   # Preview do build
 ### Integração Open-Meteo
 
 - **Endpoint:** `GET https://api.open-meteo.com/v1/forecast` (sem API key)
-- **Parâmetros:** `latitude=-7.31`, `longitude=-39.31`, `current=temperature_2m,relative_humidity_2m,rain,uv_index`, `daily=temperature_2m_max,temperature_2m_min`, `hourly=temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code`, `forecast_days=2`, `timezone=America/Fortaleza`
+- **Parâmetros padrão:** `latitude=-7.229711`, `longitude=-39.3300014`, `current=temperature_2m,relative_humidity_2m,rain,uv_index`, `daily=temperature_2m_max,temperature_2m_min`, `hourly=temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code`, `forecast_days=2`, `timezone=America/Fortaleza`
 - **Cliente:** `httpx.AsyncClient` com timeout de 10s, resposta validada pelo modelo Pydantic `WeatherData`
 
 ### Fluxo do Scheduler
 
 - `AsyncIOScheduler` com fuso `America/Fortaleza`
-- Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, **apenas loga** (`logger.warning`)
+- Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, envia aos assinantes ativos e registra o resultado em `alert_logs`
 - Jobs `forecast_morning` / `forecast_afternoon` / `forecast_night`: horas `6, 14, 20`, `jitter=900` (0–15min) — montam boletim por período e **enviam** para `FORECAST_GROUP_JID` (só registram se o JID estiver setado)
 
 ---
@@ -365,9 +372,9 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 |----------|---------|-----------|
 | `PORT` | `8000` | Porta da API (host e container) |
 | `ENVIRONMENT` | `development` | Ambiente de execução |
-| `DEFAULT_CITY` | `Juazeiro do Norte` | Cidade padrão |
-| `DEFAULT_LATITUDE` | `-7.2128` | Latitude padrão |
-| `DEFAULT_LONGITUDE` | `-39.3151` | Longitude padrão |
+| `DEFAULT_CITY` | `Triângulo, Juazeiro do Norte` | Região padrão dos alertas |
+| `DEFAULT_LATITUDE` | `-7.229711` | Latitude do bairro Triângulo |
+| `DEFAULT_LONGITUDE` | `-39.3300014` | Longitude do bairro Triângulo |
 | `OPEN_METEO_URL` | `https://api.open-meteo.com/v1/forecast` | URL do Open-Meteo |
 | `EVOLUTION_API_URL` | `http://localhost:8080` (local) / `http://evolution-api:8080` (Docker, override no compose) | URL da Evolution API |
 | `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
@@ -390,12 +397,16 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 
 ## 🗄️ Banco de Dados
 
-- O backend **não possui banco próprio** — é stateless (apenas deduplicação de mensagens em memória).
-- **PostgreSQL 15** e **Redis 7** existem exclusivamente como infraestrutura para a **Evolution API**:
+- O backend usa SQLAlchemy assíncrono e migrations Alembic. `DATABASE_URL` configura a conexão e é tratada como segredo pela aplicação.
+- Sem `DATABASE_URL`, o backend usa `sqlite+aiosqlite:///./clima_zap.db` no diretório de execução. Em Docker Compose, o backend aponta para o PostgreSQL do Compose; configure as credenciais pelo `.env`.
+- As tabelas `subscribers` e `alert_logs` guardam contatos, estado ativo/inativo, data de cadastro e o resultado dos envios. Cancelar uma inscrição desativa o registro, preservando histórico; uma nova inscrição reativa o mesmo telefone.
+- O forecast periódico grava seu status de envio. Os jobs de alertas climáticos ainda apenas geram/logam alertas, sem envio WhatsApp.
+- A imagem Docker executa `alembic upgrade head` antes de iniciar a API. Para desenvolvimento local, a partir de `backend/`, rode `python -m alembic upgrade head` antes de iniciar o servidor.
+- Para PostgreSQL gerenciado, configure uma URL `postgresql+asyncpg://...` em `DATABASE_URL` e os requisitos de TLS do provedor.
+- **PostgreSQL 15** e **Redis 7** também são usados pela **Evolution API**:
   - Evolution persiste instâncias e mensagens no PostgreSQL
   - Evolution usa Redis (`redis://redis:6379/6`, prefixo `clima-zap`) como cache
 - Volumes Docker: `postgres_data`, `redis_data`, `evolution_instances`
-- Plano futuro: PostgreSQL gerenciado (Neon/Supabase) para dados da aplicação.
 
 ---
 
@@ -432,14 +443,15 @@ cd backend
 PYTHONPATH=. python -m pytest
 ```
 
-**26 testes**, todos passando:
+Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_main.py` | 10 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` |
-| `tests/test_forecast.py` | 10 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
+| `tests/test_main.py` | 9 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` |
+| `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |
 | `tests/test_whatsapp_session.py` | 2 | `connectionState` (sucesso e erro de conexão) |
+| `tests/test_persistence.py` | 4 | Persistência/reativação de assinante e histórico de sucesso/falha de envio |
 | `test/test_health.py` | 2 | `/` online e `/health` healthy (legado) |
 
 Stack: `pytest` + `fastapi.testclient` + `unittest.mock` / `monkeypatch`.
@@ -458,6 +470,16 @@ Pipeline **Clima-Zap CI Pipeline** (`.github/workflows/ci.yml`):
   3. `pip install -r requirements.txt`
   4. `cd backend && PYTHONPATH=. python -m pytest`
 
+Pipeline de CD (`.github/workflows/cd.yml`):
+
+- Executa em push para `main` ou manualmente via `workflow_dispatch`.
+- Dispara o Render por `RENDER_DEPLOY_HOOK_URL` no environment `production`.
+- Opcionalmente verifica `/health` usando `RENDER_SERVICE_URL`.
+- O blueprint [`render.yaml`](render.yaml) cria a API Docker e um PostgreSQL gerenciado.
+- `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` e `EVOLUTION_INSTANCE_NAME` devem ser cadastrados como secrets/env vars no Render. O provedor Evolution precisa estar disponível publicamente; o Compose local continua incluindo a Evolution API.
+
+Para ativar o CD: crie o serviço a partir de `render.yaml`, gere um Deploy Hook no Render e cadastre `RENDER_DEPLOY_HOOK_URL` e `RENDER_SERVICE_URL` no environment `production` do GitHub.
+
 ---
 
 ## 📖 Documentação Adicional
@@ -473,13 +495,13 @@ Pipeline **Clima-Zap CI Pipeline** (`.github/workflows/ci.yml`):
 ## 🗺️ Roadmap / Não implementado
 
 - [x] Boletim periódico 3×/dia no grupo (`FORECAST_GROUP_JID` — manhã 06h, tarde 14h, noite 20h, jitter 0–15min)
-- [ ] Envio real de alertas agendados ao WhatsApp (job de alertas ainda apenas loga)
+- [x] Envio real de alertas agendados ao WhatsApp com histórico de sucesso/falha
 - [ ] Verificação de assinatura do webhook (`X-Hub-Signature`) em produção
 - [ ] UI do frontend com dados climáticos em tempo real (componente hoje é placeholder)
 - [ ] Estilos SCSS modulares (`*.module.scss` + `_variables.scss`)
 - [ ] Router no frontend (react-router)
-- [ ] Banco de dados próprio da aplicação (Neon/Supabase)
-- [ ] Configs de deploy: `vercel.json` (frontend) e `render.yaml` (backend)
+- [ ] Migrar a aplicação para PostgreSQL gerenciado (Neon/Supabase), se necessário
+- [x] Configuração de deploy Docker no Render e workflow de CD
 - [ ] Broadcast via `TARGET_PHONE_NUMBER`
 - [ ] Lint/format (ruff, ESLint, Prettier)
 - [ ] LICENSE

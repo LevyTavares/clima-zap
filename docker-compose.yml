@@ -24,6 +24,11 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - clima-zap-net
 
@@ -70,7 +75,10 @@ services:
     container_name: clima-zap-backend
     restart: always
     depends_on:
-      - evolution-api
+      postgres:
+        condition: service_healthy
+      evolution-api:
+        condition: service_started
     ports:
       - "${PORT:-8000}:${PORT:-8000}"
     env_file:
@@ -80,8 +88,16 @@ services:
       EVOLUTION_API_URL: http://evolution-api:8080
       DOCS_DIR: /docs
       PORT: ${PORT:-8000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USERNAME:-evolution}:${POSTGRES_PASSWORD:-evolution_pass}@postgres:5432/${POSTGRES_DATABASE:-evolution}}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
     volumes:
       - ./docs:/docs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - clima-zap-net
 
@@ -90,7 +106,8 @@ services:
     container_name: clima-zap-frontend
     restart: always
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "5173:80"
     networks:

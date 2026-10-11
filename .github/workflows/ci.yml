@@ -28,3 +28,22 @@ jobs:
       run: |
         cd backend
         PYTHONPATH=. python -m pytest
+
+    - name: Validar qualidade do código
+      run: python -m pylint backend
+
+    - name: Validar migrations
+      env:
+        DATABASE_URL: sqlite+aiosqlite:///./ci.db
+      run: |
+        cd backend
+        python -m alembic upgrade head
+        python -m alembic check
+
+    - name: Validar configuração do Compose
+      run: |
+        cp .env.example .env
+        docker compose config --quiet
+
+    - name: Construir imagens Docker
+      run: docker compose build backend frontend

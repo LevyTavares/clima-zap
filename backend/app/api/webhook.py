@@ -1,5 +1,7 @@
 import logging
 import time
+import httpx
+from evolution_api import EvolutionError
 from fastapi import APIRouter, status, BackgroundTasks
 from app.core.config import settings
 from app.schemas.webhook import WebhookPayload
@@ -57,7 +59,7 @@ FORECAST_ERROR_TEXT = (
 )
 
 
-async def route_command(command: str, sender: str) -> str:
+async def route_command(command: str) -> str:
     """Route incoming WhatsApp command to handler and return reply text."""
     if command in ("help", "?", "comandos", "ajuda"):
         return HELP_TEXT
@@ -79,8 +81,8 @@ async def route_command(command: str, sender: str) -> str:
     if command.startswith(("forecast", "previsao", "previsão", "previzao","previzão", "clima")):
         try:
             return await build_current_forecast()
-        except Exception as e:
-            logger.error(f"Erro ao buscar previsão: {e}")
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error("Erro ao buscar previsão: %s", e)
             return FORECAST_ERROR_TEXT
 
     return NOT_FOUND_TEXT
@@ -91,14 +93,14 @@ def normalize_event(event: str) -> str:
 
 async def process_event_background(payload: WebhookPayload):
     """Process incoming Evolution API webhook event."""
-    logger.info(f"Evento recebido: {payload.event} | Instância: {payload.instance}")
+    logger.info("Evento recebido: %s | Instância: %s", payload.event, payload.instance)
 
     if normalize_event(payload.event) != "messages_upsert":
         return
 
     data = payload.data
     if not isinstance(data, dict):
-        logger.warning(f"messages.upsert com data inesperado: {type(data)}")
+        logger.warning("messages.upsert com data inesperado: %s", type(data))
         return
 
     key = data.get("key", {})
@@ -107,7 +109,7 @@ async def process_event_background(payload: WebhookPayload):
 
     message_id = key.get("id", "")
     if message_id and _is_duplicate(message_id):
-        logger.info(f"Duplicado ignorado: {message_id}")
+        logger.info("Duplicado ignorado: %s", message_id)
         return
 
     message_text = extract_message_content(data)
@@ -115,14 +117,16 @@ async def process_event_background(payload: WebhookPayload):
 
     if not message_text or not sender:
         logger.info(
-            f"Vazio — text={message_text!r} sender={sender!r} "
-            f"message_type={data.get('messageType')!r}"
+            "Vazio — text=%r sender=%r message_type=%r",
+            message_text,
+            sender,
+            data.get("messageType"),
         )
         return
 
-    logger.info(f"Mensagem de {sender}: {message_text}")
-    response = await route_command(message_text.lower().strip(), sender)
-    logger.info(f"Resposta ({len(response)} chars): {response[:80]!r}...")
+    logger.info("Mensagem de %s: %s", sender, message_text)
+    response = await route_command(message_text.lower().strip())
+    logger.info("Resposta (%s chars): %r...", len(response), response[:80])
 
     # DM: strip JID suffix (send_text expects plain number).
     # Group (@g.us): keep full JID so reply lands in the group.
@@ -132,9 +136,9 @@ async def process_event_background(payload: WebhookPayload):
         target = sender.split("@")[0]
     try:
         result = await send_whatsapp_message(target, response)
-        logger.info(f"Enviado para {target}: {result}")
-    except Exception as e:
-        logger.error(f"Erro ao enviar resposta para {target}: {e}")
+        logger.info("Enviado para %s: %s", target, result)
+    except EvolutionError as e:
+        logger.error("Erro ao enviar resposta para %s: %s", target, e)
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks):
@@ -143,6 +147,6 @@ async def receive_webhook(payload: WebhookPayload, background_tasks: BackgroundT
     
     SECURITY: Verify X-Hub-Signature header in production.
     """
-    logger.info(f"Webhook: evento '{payload.event}' | instância '{payload.instance}'")
+    logger.info("Webhook: evento %r | instância %r", payload.event, payload.instance)
     background_tasks.add_task(process_event_background, payload)
     return {"status": "received", "reply": "ok"}

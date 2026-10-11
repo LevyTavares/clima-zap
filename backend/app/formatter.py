@@ -78,7 +78,7 @@ def weather_code_to_text(code: int) -> str:
     return WEATHER_CODE_TEXT.get(code, f"Código {code}")
 
 
-def format_period_summary(
+def format_period_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     city: str,
     period: str,
     temp_min: float,
@@ -94,8 +94,9 @@ def format_period_summary(
     uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_max >= 8 else "(_Tranquilo_)"
 
     # condição predominante = código mais frequente
-    main_code = max(set(weather_codes), key=weather_codes.count) if weather_codes else 0
-    condition = weather_code_to_text(main_code)
+    condition = weather_code_to_text(
+        max(set(weather_codes), key=weather_codes.count) if weather_codes else 0
+    )
 
     if rain_prob_max >= 70:
         health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
@@ -122,7 +123,14 @@ def format_period_summary(
         f"{health_tip}"
     )
 
-def format_daily_summary(city: str, temp_min: float, temp_max: float, humidity: int, uv_index: float, rain_prob: int) -> str:
+def format_daily_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    city: str,
+    temp_min: float,
+    temp_max: float,
+    humidity: int,
+    uv_index: float,
+    rain_prob: int,
+) -> str:
     """
     Gera a mensagem de resumo diário formatada para o WhatsApp.
     """

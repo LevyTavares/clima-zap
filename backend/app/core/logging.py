@@ -12,9 +12,9 @@ def setup_logging() -> logging.Logger:
         force=True,
     )
 
-    logger = logging.getLogger("clima_zap")
-    logger.info("Sistema de logs estruturados inicializado com sucesso.")
-    return logger
+    app_logger = logging.getLogger("clima_zap")
+    app_logger.info("Sistema de logs estruturados inicializado com sucesso.")
+    return app_logger
 
 
 logger = setup_logging()
