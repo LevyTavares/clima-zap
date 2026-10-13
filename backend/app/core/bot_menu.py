@@ -1,3 +1,6 @@
+# pylint: disable=duplicate-code
+
+
 def get_help_message() -> str:
     """Retorna o menu de ajuda e boas-vindas com a lista de comandos do Clima-Zap."""
     return (
