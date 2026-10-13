@@ -182,6 +182,22 @@ async def ping_clima():
 
 
 @app.get(
+    "/api/v1/forecast/preview",
+    tags=["Dados Climáticos"],
+    summary="Endpoint de Preview do Alerta"
+)
+async def get_forecast_preview():
+    """
+    Disponibilizar endpoint de visualização do relatório de clima para teste rápido de layout direto pelo Swagger UI.
+    """
+    return {
+        "cidade": "Juazeiro do Norte",
+        "temperatura": "28°C",
+        "condicao": "Chuva forte"
+    }
+
+
+@app.get(
     "/api/v1/clima/cariri",
     tags=["Dados Climáticos"],
     summary="Busca a previsão atual e alertas da região"
