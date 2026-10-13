@@ -1,17 +1,22 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
+import logging
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from evolution_api import EvolutionError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.api import fetch_cariri_weather
 from app.api.webhook import router as webhook_router
 from app.api.subscription import router as subscription_router
 from app.core.config import ROOT_DIR, settings
+from app.db.session import get_db
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
@@ -160,13 +165,45 @@ def root():
 @app.get(
     "/health", 
     tags=["Health Check"],
-    summary="Verificação detalhada de saúde"
+    summary="Verificação detalhada de saúde dos serviços (Task #35)"
 )
-async def health_check():
+async def health_check(db: AsyncSession = Depends(get_db)):
     """
-    **Health Check:** Ponto de checagem para orquestradores (como o Docker Compose).
+    **Health Check Expandido:** Avalia a integridade do banco de dados relacional 
+    e a conectividade com os serviços externos de clima.
     """
-    return {"status": "healthy"}
+    health_status = {
+        "status": "healthy",
+        "services": {
+            "database": "unhealthy",
+            "open_meteo_api": "unhealthy"
+        }
+    }
+
+    # 1. Validação de Conectividade com o Banco de Dados
+    try:
+        await db.execute(text("SELECT 1"))
+        health_status["services"]["database"] = "healthy"
+    except Exception as e:
+        logger.error("Falha no health check do banco de dados: %s", e)
+        health_status["status"] = "degraded"
+
+    # 2. Validação da API Externa de Clima (Open-Meteo)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.open-meteo.com/v1/forecast?latitude=-7.31&longitude=-39.31&current=temperature_2m",
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                health_status["services"]["open_meteo_api"] = "healthy"
+            else:
+                health_status["status"] = "degraded"
+    except Exception as e:
+        logger.error("Falha no health check da Open-Meteo: %s", e)
+        health_status["status"] = "degraded"
+
+    return health_status
 
 
 @app.get(
@@ -197,6 +234,57 @@ async def get_forecast_preview():
     }
 
 
+@app.get(
+    "/api/v1/clima/cariri",
+    tags=["Dados Climáticos"],
+    summary="Busca a previsão atual e alertas da região"
+)
+async def get_clima_cariri():
+    """
+    Consome a API da Open-Meteo em tempo real e gera alertas baseados nas regras de negócio.
+    """
+    try:
+        weather_info = await fetch_cariri_weather()
+        current = (
+            weather_info.get("current", {})
+            if isinstance(weather_info, dict)
+            else weather_info.current.model_dump()
+        )
+        uv = current.get("uv_index", 0.0)
+        humidity = current.get("relative_humidity_2m", 0.0)
+        rain = current.get("rain", 0.0)
+
+        alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
+
+        return {"weather": weather_info, "alerts": alerts}
+    except (httpx.HTTPError, ValueError) as e:
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
+        ) from e
+
+
+@app.get(
+    "/docs/whatsapp",
+    tags=["Documentação"],
+    summary="Documentação da integração WhatsApp"
+)
+async def whatsapp_docs():
+    docs_file = DOCS_DIR / "whatsapp-integration.md"
+    if not docs_file.exists():
+        raise HTTPException(status_code=404, detail="Documentação não encontrada")
+    return {"content": docs_file.read_text(encoding="utf-8")}
+
+
+@app.get(
+    "/docs/docker",
+    tags=["Documentação"],
+    summary="Documentação do setup Docker Compose"
+)
+async def docker_docs():
+    docs_file = DOCS_DIR / "docker-setup.md"
+    if not docs_file.exists():
+        raise HTTPException(status_code=404, detail="Documentação não encontrada")
+    return {"content": docs_file.read_text(encoding="utf-8")}
 @app.get(
     "/api/v1/clima/cariri",
     tags=["Dados Climáticos"],
