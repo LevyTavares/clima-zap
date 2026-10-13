@@ -5,7 +5,7 @@ from app.models import Subscriber, AlertLog  # Ajuste conforme seus modelos reai
 
 async def save_subscriber(db: AsyncSession, phone_number: str, city: str) -> Subscriber:
     """Salva ou atualiza um assinante do Clima-Zap no banco de dados."""
-    result = await db.execute(select(Subscriber).filter(Subscriber.phone_number == phone_number))
+    result = await db.execute(select(Subscriber).filter(Subscriber.phone == phone_number))
     subscriber = result.scalars().first()
     
     if subscriber:

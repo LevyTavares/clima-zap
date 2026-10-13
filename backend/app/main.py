@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from pathlib import Path
-import logging
 import httpx
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -184,7 +182,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(text("SELECT 1"))
         health_status["services"]["database"] = "healthy"
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error("Falha no health check do banco de dados: %s", e)
         health_status["status"] = "degraded"
 
@@ -199,7 +197,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 health_status["services"]["open_meteo_api"] = "healthy"
             else:
                 health_status["status"] = "degraded"
-    except Exception as e:
+    except httpx.HTTPError as e:
         logger.error("Falha no health check da Open-Meteo: %s", e)
         health_status["status"] = "degraded"
 
@@ -234,57 +232,6 @@ async def get_forecast_preview():
     }
 
 
-@app.get(
-    "/api/v1/clima/cariri",
-    tags=["Dados Climáticos"],
-    summary="Busca a previsão atual e alertas da região"
-)
-async def get_clima_cariri():
-    """
-    Consome a API da Open-Meteo em tempo real e gera alertas baseados nas regras de negócio.
-    """
-    try:
-        weather_info = await fetch_cariri_weather()
-        current = (
-            weather_info.get("current", {})
-            if isinstance(weather_info, dict)
-            else weather_info.current.model_dump()
-        )
-        uv = current.get("uv_index", 0.0)
-        humidity = current.get("relative_humidity_2m", 0.0)
-        rain = current.get("rain", 0.0)
-
-        alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
-
-        return {"weather": weather_info, "alerts": alerts}
-    except (httpx.HTTPError, ValueError) as e:
-        raise HTTPException(
-            status_code=500, detail=f"Erro ao buscar dados climáticos: {str(e)}"
-        ) from e
-
-
-@app.get(
-    "/docs/whatsapp",
-    tags=["Documentação"],
-    summary="Documentação da integração WhatsApp"
-)
-async def whatsapp_docs():
-    docs_file = DOCS_DIR / "whatsapp-integration.md"
-    if not docs_file.exists():
-        raise HTTPException(status_code=404, detail="Documentação não encontrada")
-    return {"content": docs_file.read_text(encoding="utf-8")}
-
-
-@app.get(
-    "/docs/docker",
-    tags=["Documentação"],
-    summary="Documentação do setup Docker Compose"
-)
-async def docker_docs():
-    docs_file = DOCS_DIR / "docker-setup.md"
-    if not docs_file.exists():
-        raise HTTPException(status_code=404, detail="Documentação não encontrada")
-    return {"content": docs_file.read_text(encoding="utf-8")}
 @app.get(
     "/api/v1/clima/cariri",
     tags=["Dados Climáticos"],
