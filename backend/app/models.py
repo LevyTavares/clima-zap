@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -12,6 +12,12 @@ class Subscriber(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Local definido pelo bot (/configuracao): nome (cidade geocodificada ou
+    # "lat, lon") + coordenadas; None = região padrão. Linhas antigas podem ter
+    # só a cidade preset (sem coordenadas).
+    city: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
