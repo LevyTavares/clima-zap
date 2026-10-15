@@ -47,3 +47,25 @@ jobs:
 
     - name: Construir imagens Docker
       run: docker compose build backend frontend
+
+  workers-bundle:
+    # Valida que o backend continua empacotável para Cloudflare Python Workers:
+    # dependências resolvem para wheels Pyodide e o wrangler bundla o worker.
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Baixar o código do repositório
+      uses: actions/checkout@v4
+
+    - name: Instalar uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Sincronizar dependências Pyodide (pywrangler sync)
+      working-directory: backend
+      run: uvx --from workers-py pywrangler sync
+
+    - name: Validar bundle do Worker (wrangler dry-run)
+      working-directory: backend
+      run: npx --yes wrangler deploy --dry-run --outdir /tmp/workers-bundle

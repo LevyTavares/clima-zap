@@ -33,7 +33,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Alertas agendados** via APScheduler — 6 verificações diárias (06h, 08h, 12h, 14h, 16h, 18h — fuso `America/Fortaleza`)
 - **Boletim periódico no grupo WhatsApp** — 3×/dia (manhã 06h, tarde 14h, noite 20h) com jitter 0–15min, alvo via `FORECAST_GROUP_JID`
 - **Webhook do WhatsApp** (`POST /api/v1/webhook`) com processamento assíncrono (`BackgroundTasks`), normalização de eventos e deduplicação de mensagens (TTL 5 min)
-- **Bot de WhatsApp** com comandos: `help`, `status`, `forecast` (DM e grupo)
+- **Bot de WhatsApp** com gramática estrita — comandos só valem como `/comando` ou `@clima-zap comando`: `ajuda`, `status`, `clima`, `configuracao`, `cidade`, `inscrever`, `sair` (em grupo só responde a comandos; no privado, dica única)
 - **Envio de mensagens** pelo WhatsApp via Evolution API (SDK `evolution-whatsapp`)
 - **Verificação de sessão** do WhatsApp (`/instance/connectionState`)
 - **Formatadores de mensagem** (resumo diário, alerta urgente, saudações aleatórias)
@@ -81,8 +81,8 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 | Provedor WhatsApp | Evolution API v2.3.7 (`evoapicloud/evolution-api`) |
 | Reverse Proxy (frontend) | nginx 1.27 |
 | CI/CD | GitHub Actions |
-| Banco de Dados (aplicação) | SQLite local / PostgreSQL via SQLAlchemy |
-| Hospedagem backend (planejada) | Render |
+| Banco de Dados (aplicação) | SQLite local / PostgreSQL via SQLAlchemy (Docker) · Cloudflare D1 (Workers) |
+| Hospedagem backend | Cloudflare Workers (Python Workers + D1 + Cron Triggers) — Docker/Render como alternativa |
 | Provedor Metereológico | Open-Meteo API (sem API key) |
 
 ---
@@ -129,6 +129,10 @@ clima-zap/
 │   │       └── whatsapp_session.py    # Verificação de connectionState
 │   ├── test/                     # Testes legados (health)
 │   ├── alembic/                  # Histórico versionado de schema
+│   ├── worker.py                 # Entrypoint Workers (ASGI + Cron Triggers)
+│   ├── wrangler.jsonc            # Config do Worker (crons, D1, assets)
+│   ├── pyproject.toml            # Deps do bundle Workers (Pyodide)
+│   ├── migrations/               # Migrations D1 (SQL)
 │   └── tests/                    # Suíte principal
 │       ├── conftest.py
 │       ├── test_alerts.py
@@ -255,7 +259,7 @@ npm run preview   # Preview do build
 | GET | `/` | Health Check | Status raiz da API |
 | GET | `/health` | Health Check | Health check detalhado |
 | GET | `/api/v1/clima/ping` | Health Check | Ping do módulo de clima |
-| GET | `/api/v1/clima/cariri` | Dados Climáticos | Previsão atual + alertas gerados |
+| GET | `/api/v1/clima/cariri` | Dados Climáticos | Previsão atual + alertas gerados (`?cidade=Barbalha\|Juazeiro do Norte\|Crato`) |
 | GET | `/docs/whatsapp` | Documentação | Markdown da integração WhatsApp |
 | GET | `/docs/docker` | Documentação | Markdown do setup Docker |
 | POST | `/api/v1/webhook` | Webhook do WhatsApp | Recebe eventos da Evolution API |
@@ -295,9 +299,64 @@ npm run preview   # Preview do build
 
 ### Fluxo do Scheduler
 
-- `AsyncIOScheduler` com fuso `America/Fortaleza`
+- `AsyncIOScheduler` com fuso `America/Fortaleza` (caminho Docker/Render)
 - Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, envia aos assinantes ativos e registra o resultado em `alert_logs`
 - Jobs `forecast_morning` / `forecast_afternoon` / `forecast_night`: horas `6, 14, 20`, `jitter=900` (0–15min) — montam boletim por período e **enviam** para `FORECAST_GROUP_JID` (só registram se o JID estiver setado)
+- No Cloudflare Workers o mesmo fluxo roda via **Cron Triggers** (ver seção seguinte), sem jitter
+
+---
+
+## ☁️ Backend no Cloudflare Workers
+
+O backend roda como **Python Worker** (FastAPI nativo via ASGI, GA desde set/2026):
+
+| Docker/Render | Cloudflare Workers |
+|---------------|--------------------|
+| FastAPI + Uvicorn | FastAPI via ASGI server do Workers (`workers.asgi.entrypoint`) |
+| APScheduler (cron local) | Cron Triggers (UTC) + handler `scheduled()` em `backend/worker.py` |
+| SQLite / PostgreSQL (SQLAlchemy) | Cloudflare D1 (`app/db/d1.py`, schema em `backend/migrations/`) |
+| `.env` / ambiente | `vars` + `wrangler secret put` (sincronizados em `settings` pelo middleware) |
+| Jitter anti-spam 0–15min | Sem jitter (isolate não dorme barato) |
+
+A aplicação é **dual-mode**: no caminho Docker nada muda ( SQLAlchemy + APScheduler
+continuam no ar); no Workers, `app/core/worker_runtime.py` detecta o isolate e
+troca persistência para D1 e agendamento para Cron Triggers.
+
+### Deploy
+
+Pré-requisitos: conta Cloudflare, [Node.js](https://nodejs.org) e [`uv`](https://docs.astral.sh/uv/).
+
+```bash
+cd backend
+
+# 1. Sincroniza dependências para Pyodide (gera python_modules/ e pylock.toml)
+uvx --from workers-py pywrangler sync
+
+# 2. Cria o banco D1 e cola o id retornado em database_id (wrangler.jsonc)
+npx wrangler d1 create clima-zap
+
+# 3. Aplica o schema no D1
+npx wrangler d1 migrations apply clima-zap --remote
+
+# 4. Segredos (nomes em CAIXA ALTA; o código aceita também os nomes do .env)
+npx wrangler secret put EVOLUTION_API_URL
+npx wrangler secret put EVOLUTION_API_KEY
+npx wrangler secret put EVOLUTION_INSTANCE_NAME
+npx wrangler secret put FORECAST_GROUP_JID   # opcional: boletins 06/14/20h
+npx wrangler secret put WEBHOOK_AUTH_TOKEN   # opcional: bearer no webhook
+npx wrangler secret put TARGET_PHONE_NUMBER  # opcional: menção nativa @número
+
+# 5. Deploy
+uvx --from workers-py pywrangler deploy
+```
+
+- **Webhook da Evolution:** `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
+- **Cron Triggers:** alertas `0 9,11,15,17,19,21 * * *` (06/08/12/14/16/18h BRT) e
+  boletins `0 9,17,23 * * *` (06/14/20h BRT) — America/Fortaleza = UTC-3 fixo
+- **Docs markdown** (`/docs/whatsapp`, `/docs/docker`) são servidos dos Assets
+  do Worker (diretório `docs/` no `wrangler.jsonc`)
+- **Dev local:** `uvx --from workers-py pywrangler dev` (workerd + D1 local;
+  aplique antes `npx wrangler d1 migrations apply clima-zap --local`)
 
 ---
 
@@ -311,12 +370,27 @@ WhatsApp User → Evolution API → Webhook → Clima-Zap → Evolution API → 
 
 ### Comandos suportados
 
+Os comandos valem em **duas formas de invocação**:
+
+1. `/comando [argumentos]` — ex: `/clima`, `/cidade Crato`;
+2. `@clima-zap comando [argumentos]` — ex: `@clima-zap previsao` (o nome vem de `BOT_NAME`; a menção nativa do WhatsApp `@número` também vale, requerendo `TARGET_PHONE_NUMBER`).
+
 | Comando | Resposta |
 |---------|----------|
-| `help`, `?`, `comandos`, `ajuda` | Texto de ajuda com a lista de comandos |
-| `status`, `status?` | Status da API + estado da instância WhatsApp |
-| `forecast`, `previsao`, `previsão`, `previzao`, `previzão`, `clima` | Resumo diário do clima + alertas ativos |
-| Outro | Mensagem de comando não reconhecido |
+| `/help`, `/?`, `/comandos`, `/ajuda` | Menu de ajuda com a lista de comandos |
+| `/status`, `/status?` | Status da API + estado da instância WhatsApp |
+| `/forecast`, `/previsao`, `/previsão`, `/previzao`, `/previzão`, `/clima` | Resumo do clima + alertas ativos (usa o local do `/configuracao`) |
+| `/configuracao` | Mostra o local atual (ou a região padrão) |
+| `/configuracao <cidade>` | Define o local — presets do Crajubar ou qualquer cidade (geocoder Open-Meteo) |
+| `/configuracao <lat,lon>` | Define por coordenadas (ex: `/configuracao -7.23, -39.31`) |
+| `/configuracao padrao` | Remove o local e volta à região padrão |
+| `/cidade <nome>` | Atalho de `/configuracao` para cidades |
+| `/inscrever` | Ativa o envio de alertas climáticos para o contato |
+| `/sair` | Cancela a inscrição dos alertas climáticos |
+| Comando desconhecido (`/foo`) | Mensagem de comando não reconhecido + `/ajuda` |
+| Texto sem invocação | Grupo: silêncio · Privado: dica única de `/ajuda` |
+
+> Texto sem `/` e sem menção **não** é comando: `ajuda` puro é ignorado.
 
 ### Payload de exemplo (webhook)
 
@@ -331,7 +405,7 @@ WhatsApp User → Evolution API → Webhook → Clima-Zap → Evolution API → 
       "id": "3EB0XXXXX"
     },
     "message": {
-      "conversation": "help"
+      "conversation": "/help"
     }
   },
   "sender": "558899887766@s.whatsapp.net"
@@ -352,7 +426,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
         "fromMe": false,
         "id": "3EB0XXXXX"
       },
-      "message": { "conversation": "help" }
+      "message": { "conversation": "/help" }
     },
     "sender": "558899887766@s.whatsapp.net"
   }'
@@ -379,8 +453,10 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | `EVOLUTION_API_URL` | `http://localhost:8080` (local) / `http://evolution-api:8080` (Docker, override no compose) | URL da Evolution API |
 | `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
 | `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância WhatsApp |
-| `TARGET_PHONE_NUMBER` | *(vazio)* | Número alvo (broadcast — não utilizado ainda) |
+| `TARGET_PHONE_NUMBER` | *(vazio)* | Número do próprio bot (só dígitos) — ativa a menção nativa `@número` como invocação de comando |
+| `BOT_NAME` | `clima-zap` | Nome do bot na invocação textual: `@clima-zap previsao` |
 | `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Vazio = jobs desativados |
+| `WEBHOOK_AUTH_TOKEN` | *(vazio)* | Se definido, o webhook exige `Authorization: Bearer <token>` (configure como header custom no webhook da Evolution). Vazio = sem verificação |
 | `DOCS_DIR` | *(vazio → `docs/` da raiz)* / `/docs` (Docker) | Diretório da documentação markdown |
 | `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
 | `POSTGRES_USERNAME` | `evolution` | Usuário do PostgreSQL |
@@ -447,11 +523,19 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_main.py` | 9 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` |
+| `tests/test_webhook.py` | 19 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta e autenticação `Bearer` |
+| `tests/test_d1_store.py` | 16 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
+| `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
+| `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |
+| `tests/test_location.py` | 4 | Presets do Crajubar, fallback de cidade e parsing de `lat,lon` |
+| `tests/test_command_parser.py` | 4 | Gramática de invocação: `/cmd`, `@clima-zap cmd`, menção nativa e texto solto |
+| `tests/test_geocode.py` | 3 | Geocoder Open-Meteo (sucesso, miss e falha de rede) |
 | `tests/test_whatsapp_session.py` | 2 | `connectionState` (sucesso e erro de conexão) |
-| `tests/test_persistence.py` | 4 | Persistência/reativação de assinante e histórico de sucesso/falha de envio |
+| `tests/test_resilience.py` | 2 | Retry assíncrono (backoff e limite de tentativas) |
+| `tests/test_bot.py` | 1 | Conteúdo do menu de ajuda do bot |
+| `tests/test_preview.py` | 1 | Endpoint `/api/v1/forecast/preview` |
 | `test/test_health.py` | 2 | `/` online e `/health` healthy (legado) |
 
 Stack: `pytest` + `fastapi.testclient` + `unittest.mock` / `monkeypatch`.
@@ -496,7 +580,7 @@ Para ativar o CD: crie o serviço a partir de `render.yaml`, gere um Deploy Hook
 
 - [x] Boletim periódico 3×/dia no grupo (`FORECAST_GROUP_JID` — manhã 06h, tarde 14h, noite 20h, jitter 0–15min)
 - [x] Envio real de alertas agendados ao WhatsApp com histórico de sucesso/falha
-- [ ] Verificação de assinatura do webhook (`X-Hub-Signature`) em produção
+- [x] Verificação opcional do webhook via token (`WEBHOOK_AUTH_TOKEN` → `Authorization: Bearer`)
 - [ ] UI do frontend com dados climáticos em tempo real (componente hoje é placeholder)
 - [ ] Estilos SCSS modulares (`*.module.scss` + `_variables.scss`)
 - [ ] Router no frontend (react-router)

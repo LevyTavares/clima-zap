@@ -55,6 +55,10 @@ curl -X POST "http://localhost:8080/webhook/set/clima-zap" \
   }'
 ```
 
+> No Cloudflare Workers a URL é `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
+> (se `WEBHOOK_AUTH_TOKEN` estiver setado no Worker, adicione também
+> `"headers": {"Authorization": "Bearer <token>"}` ao payload do webhook).
+
 ### 4. Environment Variables
 
 Set everything in the root `.env` (copied from `.env.example`) — used by Docker Compose and the backend:
@@ -81,7 +85,7 @@ Evolution API sends POST to `/api/v1/webhook`:
       "id": "3EB0XXXXX"
     },
     "message": {
-      "conversation": "help"
+      "conversation": "/help"
     }
   },
   "sender": "558899887766@s.whatsapp.net"
@@ -90,12 +94,31 @@ Evolution API sends POST to `/api/v1/webhook`:
 
 ## Supported Commands
 
+Commands are recognized in **two invocation forms** only:
+
+1. `/command [args]` — e.g. `/clima`, `/cidade Crato`;
+2. `@clima-zap command [args]` — the bot name comes from `BOT_NAME`; a native WhatsApp mention (`@number`) also counts and requires `TARGET_PHONE_NUMBER` (the bot's own number).
+
 | Command | Response |
 |---------|----------|
-| `help`, `?`, `comandos`, `ajuda` | Help text |
-| `status`, `status?` | System status |
-| `forecast`, `previsao`, `previsão`, `previzao`, `previzão`, `clima` | Weather forecast |
-| Other | Command not understood |
+| `/help`, `/?`, `/comandos`, `/ajuda` | Help menu with the command list |
+| `/status`, `/status?` | System status |
+| `/forecast`, `/previsao`, `/previsão`, `/previzao`, `/previzão`, `/clima` | Weather forecast + active alerts (uses the location set via `/configuracao`) |
+| `/configuracao` | Show the current location (default region when unset) |
+| `/configuracao <city>` | Set the location — Crajubar presets or any city (Open-Meteo geocoder) |
+| `/configuracao <lat,lon>` | Set by coordinates (e.g. `/configuracao -7.23, -39.31`) |
+| `/configuracao padrao` | Clear the location and return to the default region |
+| `/cidade <name>` | Shortcut of `/configuracao` for cities |
+| `/inscrever` | Subscribe the contact to weather alerts |
+| `/sair` | Unsubscribe the contact from weather alerts |
+| Unknown command (`/foo`) | Command-not-understood message pointing to `/ajuda` |
+| Non-command text | In groups: silence. In DMs: a one-time hint with `/ajuda`. |
+
+Plain text without `/` or a mention is **not** a command (`ajuda` alone is ignored).
+
+### Webhook authentication (optional)
+
+If `WEBHOOK_AUTH_TOKEN` is set, `POST /api/v1/webhook` requires the header `Authorization: Bearer <token>` (HTTP 401 otherwise). Configure the same value as a **custom header** on the Evolution API instance webhook (`webhook.headers`). When empty, the endpoint stays open (development default).
 
 ## Periodic Group Forecast
 
@@ -132,7 +155,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
         "id": "3EB0XXXXX"
       },
       "message": {
-        "conversation": "help"
+        "conversation": "/help"
       }
     },
     "sender": "558899887766@s.whatsapp.net"
