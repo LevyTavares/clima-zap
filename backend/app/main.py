@@ -2,23 +2,27 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 import httpx
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from evolution_api import EvolutionError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.api import fetch_cariri_weather
+from app.api.forecast import router as forecast_router
 from app.api.webhook import router as webhook_router
 from app.api.subscription import router as subscription_router
+from app.core import worker_runtime
 from app.core.config import ROOT_DIR, settings
+from app.core.location import CRAJUBAR_LOCATIONS, match_city
+from app.db import d1
 from app.db.session import get_db
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
+from app.services.persistence import group_active_subscribers_by_city, resolve_group_location
 from app.services.weather_dispatch import dispatch_weather_alerts
 
 # Prefer DOCS_DIR (.env / Docker mount at /docs); fallback to repo docs/ (dev).
@@ -36,19 +40,35 @@ FORECAST_PERIOD_JOBS: list[tuple[str, int, Period]] = [
 ]
 FORECAST_JITTER_SECONDS = 900  # 15min
 
+# Hora BRT → período do boletim (usado pelos Cron Triggers do Workers,
+# que disparam sem jitter).
+FORECAST_PERIOD_BY_HOUR: dict[int, Period] = {
+    hour: period for _, hour, period in FORECAST_PERIOD_JOBS
+}
+
 
 async def process_scheduled_weather_alerts() -> None:
-    weather_info = await fetch_cariri_weather()
-    current = weather_info.current.model_dump()
-    alerts = generate_weather_alerts(
-        uv_index=current.get("uv_index", 0.0),
-        humidity=current.get("relative_humidity_2m", 0.0),
-        rain_prob=current.get("rain", 0.0),
-    )
+    """Gera e envia alertas por região: sempre a padrão + cada cidade de assinantes."""
+    try:
+        groups = await group_active_subscribers_by_city()
+    except SQLAlchemyError as error:
+        logger.error("Erro ao buscar assinantes ativos: %s", error)
+        groups = {}
 
-    for alert in alerts:
-        logger.warning("Alerta climático programado: %s", alert)
-    await dispatch_weather_alerts(alerts)
+    # Região padrão ('') é sempre avaliada, mesmo sem assinantes, para logar alertas.
+    for city, subscribers in {"": [], **groups}.items():
+        location = resolve_group_location(city, subscribers)
+        weather_info = await fetch_cariri_weather(location)
+        current = weather_info.current.model_dump()
+        alerts = generate_weather_alerts(
+            uv_index=current.get("uv_index", 0.0),
+            humidity=current.get("relative_humidity_2m", 0.0),
+            rain_prob=current.get("rain", 0.0),
+        )
+
+        for alert in alerts:
+            logger.warning("Alerta climático programado: %s", alert)
+        await dispatch_weather_alerts(alerts, subscribers=subscribers)
 
 
 async def send_period_forecast(period: Period) -> None:
@@ -106,6 +126,12 @@ def register_forecast_jobs() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if worker_runtime.is_workers_runtime():
+        # No Workers os agendamentos vêm dos Cron Triggers (backend/worker.py)
+        # e o ASGI serveria o lifespan a cada request — não iniciamos o
+        # APScheduler aqui.
+        yield
+        return
     scheduler.add_job(
         process_scheduled_weather_alerts,
         trigger="cron",
@@ -142,12 +168,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def attach_worker_env(request: Request, call_next):
+    """Cloudflare Workers: expõe bindings/vars (env) para settings e D1.
+
+    No caminho local ``scope['env']`` não existe e nada muda.
+    """
+    worker_runtime.attach(request.scope.get("env"))
+    return await call_next(request)
+
+
 # Registra os roteadores modularizados
 app.include_router(webhook_router, tags=["Webhook do WhatsApp"])
 app.include_router(subscription_router, tags=["Gestão de Inscrições"])
+app.include_router(forecast_router)
 
 
 # --- 2. DOCUMENTAÇÃO DAS ROTAS ---
+async def _read_docs_file(request: Request, filename: str) -> str:
+    """Lê um markdown de docs: Assets do Worker (Workers) ou disco (local)."""
+    assets = worker_runtime.assets()
+    if assets is not None:
+        # O fetch do binding exige URL absoluta (a origem do request).
+        response = await assets.fetch(f"{request.base_url}{filename}")
+        if response.status == 200:
+            return str(await response.text())
+    docs_file = DOCS_DIR / filename
+    if not docs_file.exists():
+        raise HTTPException(status_code=404, detail="Documentação não encontrada")
+    return docs_file.read_text(encoding="utf-8")
+
+
 @app.get(
     "/", 
     tags=["Health Check"],
@@ -165,7 +217,7 @@ def root():
     tags=["Health Check"],
     summary="Verificação detalhada de saúde dos serviços (Task #35)"
 )
-async def health_check(db: AsyncSession = Depends(get_db)):
+async def health_check(db=Depends(get_db)):
     """
     **Health Check Expandido:** Avalia a integridade do banco de dados relacional 
     e a conectividade com os serviços externos de clima.
@@ -179,10 +231,14 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     }
 
     # 1. Validação de Conectividade com o Banco de Dados
+    # No Workers (D1) o check usa o binding direto; local, o SQLAlchemy.
     try:
-        await db.execute(text("SELECT 1"))
+        if worker_runtime.on_workers():
+            await d1.ping()
+        else:
+            await db.execute(text("SELECT 1"))
         health_status["services"]["database"] = "healthy"
-    except SQLAlchemyError as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("Falha no health check do banco de dados: %s", e)
         health_status["status"] = "degraded"
 
@@ -217,42 +273,35 @@ async def ping_clima():
 
 
 @app.get(
-    "/api/v1/forecast/preview",
-    tags=["Dados Climáticos"],
-    summary="Endpoint de Preview do Alerta"
-)
-async def get_forecast_preview():
-    """
-    Disponibilizar endpoint de visualização do relatório de clima para teste rápido de layout direto pelo Swagger UI.
-    """
-    return {
-        "cidade": "Juazeiro do Norte",
-        "temperatura": "28°C",
-        "condicao": "Chuva forte"
-    }
-
-
-@app.get(
-    "/api/v1/clima/cariri",
+    "/api/v1/clima/cariri", 
     tags=["Dados Climáticos"],
     summary="Busca a previsão atual e alertas da região"
 )
-async def get_clima_cariri():
+async def get_clima_cariri(cidade: str | None = None):
     """
     Consome a API da Open-Meteo em tempo real e gera alertas baseados nas regras de negócio.
-    """
-    try:
-        weather_info = await fetch_cariri_weather()
-        current = (
-            weather_info.get("current", {})
-            if isinstance(weather_info, dict)
-            else weather_info.current.model_dump()
-        )
-        uv = current.get("uv_index", 0.0)
-        humidity = current.get("relative_humidity_2m", 0.0)
-        rain = current.get("rain", 0.0)
 
-        alerts = generate_weather_alerts(uv_index=uv, humidity=humidity, rain_prob=rain)
+    Use `?cidade=` para uma localização do Crajubar (Barbalha, Juazeiro do Norte, Crato);
+    sem parâmetro usa a região padrão.
+    """
+    location = None
+    query = cidade.strip() if cidade else None
+    if query:
+        location = match_city(query)
+        if location is None:
+            options = ", ".join(data["name"] for data in CRAJUBAR_LOCATIONS.values())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cidade desconhecida: {query}. Opções: {options}.",
+            )
+    try:
+        weather_info = await fetch_cariri_weather(location)
+        current = weather_info.current.model_dump()
+        alerts = generate_weather_alerts(
+            uv_index=current.get("uv_index", 0.0),
+            humidity=current.get("relative_humidity_2m", 0.0),
+            rain_prob=current.get("rain", 0.0),
+        )
 
         return {"weather": weather_info, "alerts": alerts}
     except (httpx.HTTPError, ValueError) as e:
@@ -266,11 +315,8 @@ async def get_clima_cariri():
     tags=["Documentação"],
     summary="Documentação da integração WhatsApp"
 )
-async def whatsapp_docs():
-    docs_file = DOCS_DIR / "whatsapp-integration.md"
-    if not docs_file.exists():
-        raise HTTPException(status_code=404, detail="Documentação não encontrada")
-    return {"content": docs_file.read_text(encoding="utf-8")}
+async def whatsapp_docs(request: Request):
+    return {"content": await _read_docs_file(request, "whatsapp-integration.md")}
 
 
 @app.get(
@@ -278,8 +324,5 @@ async def whatsapp_docs():
     tags=["Documentação"],
     summary="Documentação do setup Docker Compose"
 )
-async def docker_docs():
-    docs_file = DOCS_DIR / "docker-setup.md"
-    if not docs_file.exists():
-        raise HTTPException(status_code=404, detail="Documentação não encontrada")
-    return {"content": docs_file.read_text(encoding="utf-8")}
+async def docker_docs(request: Request):
+    return {"content": await _read_docs_file(request, "docker-setup.md")}

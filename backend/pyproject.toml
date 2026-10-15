@@ -1,0 +1,26 @@
+[project]
+name = "clima-zap-api"
+version = "1.0.0"
+description = "API de monitoramento e alertas climáticos do Cariri (Cloudflare Workers)"
+readme = "../README.md"
+requires-python = ">=3.12"
+# Dependências do bundle do Worker (Python Workers/Pyodide). O restante do
+# toolchain (uvicorn, alembic, aiosqlite, asyncpg, pytest, pylint) é exclusivo
+# do caminho Docker/Render e fica no requirements.txt da raiz.
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "httpx",
+    "sqlalchemy",
+    "apscheduler",
+    "evolution-whatsapp",
+    "tzdata",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+]

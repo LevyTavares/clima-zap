@@ -1,0 +1,44 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "clima-zap-api",
+	"main": "worker.py",
+	"compatibility_date": "2026-08-01",
+	"compatibility_flags": [
+		"python_workers"
+	],
+	// America/Fortaleza = UTC-3 (sem DST desde 2019).
+	// Alertas  06/08/12/14/16/18h BRT → 09/11/15/17/19/21h UTC.
+	// Boletins 06/14/20h BRT         → 09/17/23h UTC.
+	"triggers": {
+		"crons": [
+			"0 9,11,15,17,19,21 * * *",
+			"0 9,17,23 * * *"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "clima-zap",
+			"database_id": "REPLACE_COM_O_ID_DO_D1",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Docs markdown (docs/whatsapp-integration.md, docs/docker-setup.md)
+	// servidos nos endpoints /docs/* via env.ASSETS.
+	"assets": {
+		"directory": "../docs",
+		"binding": "ASSETS"
+	},
+	// Vars não-secretas. Segredos vão em `wrangler secret put <NOME>`:
+	//   EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME,
+	//   FORECAST_GROUP_JID, WEBHOOK_AUTH_TOKEN
+	// Número do próprio bot (menções nativas na gramática) também pode ir
+	// aqui ou como secret: "TARGET_PHONE_NUMBER": "5588999999999".
+	"vars": {
+		"ENVIRONMENT": "production",
+		"BOT_NAME": "clima-zap"
+	},
+	"observability": {
+		"enabled": true
+	}
+}

@@ -9,6 +9,13 @@ __pycache__/
 *.pyc
 *.db
 
+# Cloudflare Workers (pywrangler)
+backend/.dev.vars
+backend/python_modules/
+backend/.venv-workers/
+backend/pylock.toml
+backend/.wrangler/
+
 # Frontend
 node_modules/
 frontend/dist/

@@ -1,5 +1,7 @@
 [MAIN]
 source-roots=backend
+# Artefatos do bundle Cloudflare Workers (pywrangler sync / wrangler dev)
+ignore=python_modules,.venv-workers,.wrangler,pylock.toml
 
 [TYPECHECK]
 generated-members=alembic.context.*

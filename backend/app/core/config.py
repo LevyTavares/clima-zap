@@ -19,8 +19,15 @@ class Settings(BaseSettings):
     evolution_api_url: str = "http://localhost:8080"
     evolution_api_key: str = ""
     evolution_instance_name: str = ""
+    # Número do próprio bot (só dígitos) — usado para detectar menções nativas
+    # do WhatsApp (@número) que apontem para o bot na gramática de comandos.
     target_phone_number: str = ""
+    # Nome do bot na invocação textual: "@clima-zap previsao".
+    bot_name: str = "clima-zap"
     forecast_group_jid: str = ""
+    # Token opcional exigido no header `Authorization: Bearer <token>` do webhook.
+    # Vazio = sem verificação. Configure também um header custom no webhook da Evolution.
+    webhook_auth_token: str = ""
     docs_dir: str = ""
     database_url: SecretStr = SecretStr("sqlite+aiosqlite:///./clima_zap.db")
     database_ssl: bool = False

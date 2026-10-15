@@ -4,31 +4,12 @@ import pytest
 from evolution_api import EvolutionConnectionError
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
-import app.db.session as db_session
 import app.main as main_module
-from app.services import weather_dispatch
-from app.db.base import Base
+from app.services import persistence, weather_dispatch
+from app.services.persistence import resolve_group_location
 from app.main import app
 from app.models import AlertLog, Subscriber
-
-
-@pytest.fixture(name="test_database")
-def database_fixture(monkeypatch, tmp_path):
-    database_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
-    engine = create_async_engine(database_url, poolclass=NullPool)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    async def create_schema():
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-
-    asyncio.run(create_schema())
-    monkeypatch.setattr(db_session, "SessionLocal", session_factory)
-    yield session_factory
-    asyncio.run(engine.dispose())
 
 
 def test_subscription_persists_and_can_be_reactivated(test_database):
@@ -144,3 +125,73 @@ def test_weather_alert_is_sent_to_active_subscriber(test_database, monkeypatch):
     assert alert_log.alert_type == "weather_alert"
     assert alert_log.delivery_status == "sent"
     assert alert_log.recipient == "+15559876543"
+
+
+# ---------------------------------------------------------------------------
+# Localização (/configuracao), dica única no privado e agrupamento de alertas
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("test_database")
+def test_location_roundtrip_and_reset_via_sqlalchemy():
+    async def flow():
+        await persistence.set_subscriber_location(
+            "+15551112222", "Fortaleza, Ceará", -3.73, -38.53
+        )
+        location = await persistence.get_subscriber_location("+15551112222")
+        await persistence.clear_subscriber_location("+15551112222")
+        cleared = await persistence.get_subscriber_location("+15551112222")
+        return location, cleared
+
+    location, cleared = asyncio.run(flow())
+
+    assert location == {
+        "name": "Fortaleza, Ceará",
+        "latitude": -3.73,
+        "longitude": -38.53,
+    }
+    assert cleared is None
+
+
+def test_legacy_city_without_coords_resolves_preset(test_database):
+    async def create_legacy():
+        async with test_database() as session:
+            session.add(Subscriber(phone="+15555556666", city="Crato", is_active=True))
+            await session.commit()
+
+    asyncio.run(create_legacy())
+    location = asyncio.run(persistence.get_subscriber_location("+15555556666"))
+
+    assert location["name"] == "Crato"
+    assert location["latitude"] == pytest.approx(-7.2342)
+    assert location["longitude"] == pytest.approx(-39.4086)
+
+
+def test_dm_hint_local_shows_only_once():
+    phone = "+15553334444"  # telefone único entre testes (estado em memória)
+
+    assert asyncio.run(persistence.should_hint_dm(phone)) is True
+    assert asyncio.run(persistence.should_hint_dm(phone)) is False
+
+
+def test_resolve_group_location_prefers_coords_then_preset():
+    with_coords = Subscriber(
+        phone="+15557778888",
+        city="Fortaleza, Ceará",
+        latitude=-3.73,
+        longitude=-38.53,
+    )
+    preset_only = Subscriber(phone="+15559990000", city="Crato")
+
+    located = resolve_group_location("Crato", [with_coords, preset_only])
+    assert located == {
+        "name": "Fortaleza, Ceará",
+        "latitude": -3.73,
+        "longitude": -38.53,
+    }
+
+    preset = resolve_group_location("Crato", [preset_only])
+    assert preset["name"] == "Crato"
+    assert preset["latitude"] == pytest.approx(-7.2342)
+
+    assert resolve_group_location("", [Subscriber(phone="+15550000000")]) is None

@@ -45,7 +45,7 @@ def test_scheduled_weather_alerts_hours():
 
 
 def test_scheduled_weather_alerts_process(monkeypatch, caplog):
-    async def mock_fetch_cariri_weather():
+    async def mock_fetch_cariri_weather(_location=None):
         from app.schemas.schemas import CurrentWeather, WeatherData
 
         return WeatherData(
@@ -133,7 +133,10 @@ def test_send_period_forecast_sends(monkeypatch):
 
 
 def test_cariri_weather_endpoint(monkeypatch):
-    async def mock_fetch_cariri_weather():
+    fetched = {}
+
+    async def mock_fetch_cariri_weather(location=None):
+        fetched["location"] = location
         from app.schemas.schemas import CurrentWeather, WeatherData
 
         return WeatherData(
@@ -157,3 +160,38 @@ def test_cariri_weather_endpoint(monkeypatch):
     assert data["weather"]["current"]["temperature_2m"] == 28.5
     assert "alerts" in data
     assert len(data["alerts"]) == 1  # UV igual a 8 aciona 1 alerta
+    assert fetched["location"] is None  # sem ?cidade= → região padrão
+
+
+def test_cariri_weather_endpoint_with_city(monkeypatch):
+    fetched = {}
+
+    async def mock_fetch_cariri_weather(location=None):
+        fetched["location"] = location
+        from app.schemas.schemas import CurrentWeather, WeatherData
+
+        return WeatherData(
+            latitude=location["latitude"],
+            longitude=location["longitude"],
+            current=CurrentWeather(
+                temperature_2m=28.5,
+                relative_humidity_2m=60,
+                rain=0,
+                uv_index=8,
+            ),
+        )
+
+    monkeypatch.setattr("app.main.fetch_cariri_weather", mock_fetch_cariri_weather)
+
+    response = client.get("/api/v1/clima/cariri", params={"cidade": "Crato"})
+
+    assert response.status_code == 200
+    assert fetched["location"]["name"] == "Crato"
+    assert response.json()["weather"]["latitude"] == -7.2342
+
+
+def test_cariri_weather_endpoint_unknown_city():
+    response = client.get("/api/v1/clima/cariri", params={"cidade": "Fortaleza"})
+
+    assert response.status_code == 400
+    assert "Cidade desconhecida" in response.json()["detail"]
