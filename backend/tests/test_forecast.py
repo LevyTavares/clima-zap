@@ -127,7 +127,7 @@ def test_build_period_forecast_uses_hourly(monkeypatch):
 
 
 def test_build_current_forecast(monkeypatch):
-    async def mock_fetch():
+    async def mock_fetch(_location=None):
         return WeatherData(
             latitude=-7.31,
             longitude=-39.31,

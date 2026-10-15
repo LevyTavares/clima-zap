@@ -6,6 +6,7 @@ from typing import Literal
 
 from app.api.api import fetch_cariri_weather
 from app.core.config import settings
+from app.core.location import LocationData
 from app.formatter import format_daily_summary, format_period_summary
 from app.services.alerts import generate_weather_alerts
 
@@ -22,9 +23,10 @@ PERIOD_HOURS: dict[Period, tuple[int, int]] = {
 }
 
 
-async def build_current_forecast() -> str:
+async def build_current_forecast(location: LocationData | None = None) -> str:
     """Forecast on-demand do comando `forecast` (resumo diário + alertas)."""
-    w = await fetch_cariri_weather()
+    w = await fetch_cariri_weather(location)
+    city = location["name"] if location else settings.default_city
     cur = w.current
     temp_max = (
         w.daily.temperature_2m_max[0]
@@ -37,7 +39,7 @@ async def build_current_forecast() -> str:
         else cur.temperature_2m
     )
     summary = format_daily_summary(
-        city=settings.default_city,
+        city=city,
         temp_min=temp_min,
         temp_max=temp_max,
         humidity=int(cur.relative_humidity_2m),

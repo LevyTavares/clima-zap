@@ -1,12 +1,13 @@
 import httpx
 from app.core.config import settings
+from app.core.location import LocationData
 from app.schemas.schemas import WeatherData
 
-async def fetch_cariri_weather() -> WeatherData:
+async def fetch_cariri_weather(location: LocationData | None = None) -> WeatherData:
     # Coordenadas configuráveis; o padrão aponta para o bairro Triângulo.
     params = {
-        "latitude": settings.default_latitude,
-        "longitude": settings.default_longitude,
+        "latitude": location["latitude"] if location else settings.default_latitude,
+        "longitude": location["longitude"] if location else settings.default_longitude,
         "current": "temperature_2m,relative_humidity_2m,rain,uv_index",
         "daily": "temperature_2m_max,temperature_2m_min",
         "hourly": "temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code",
