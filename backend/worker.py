@@ -1,21 +1,21 @@
 """Entrypoint do Cloudflare Workers: FastAPI (ASGI) + Cron Triggers.
 
-- Requests HTTP → a app FastAPI de ``app.main``; o env do Worker (bindings
-  D1/Assets e vars/secrets) é anexado por um middleware em ``app.main``.
-- Cron Triggers → os mesmos jobs do APScheduler, disparados pela hora BRT
+- Requests HTTP  a app FastAPI de ``app.main``; o env do Worker (bindings
+  D1/Assets e vars/secrets)  anexado por um middleware em ``app.main``.
+- Cron Triggers  os mesmos jobs do APScheduler, disparados pela hora BRT
   (UTC-3) do ``scheduledTime``: alertas 06/08/12/14/16/18h e boletins
-  06/14/20h. Sem jitter anti-spam (o isolate não dorme barato).
+  06/14/20h. Sem jitter anti-spam (o isolate no dorme barato).
 
-Deploy (a partir de backend/): ``uv run pywrangler deploy`` — veja README.
+Deploy (a partir de backend/): ``uv run pywrangler deploy``  veja README.
 """
 
 import logging
 
 import httpx._client as httpx_client
-from workers import asgi
+from workers import asgi  # pylint: disable=import-error
 
 # O transporte httpx do Pyodide entrega corpo comprimido sem decodificar
-# (workerd fetch + pyfetch) — forçamos `Accept-Encoding: identity` para todos
+# (workerd fetch + pyfetch)  foramos `Accept-Encoding: identity` para todos
 # os clientes (os nossos e os do SDK evolution-whatsapp). Deve rodar antes de
 # qualquer httpx.Client/AsyncClient ser criado.
 httpx_client.ACCEPT_ENCODING = "identity"
@@ -45,7 +45,7 @@ class Default(_AsgiEntrypoint):
         """Cron Trigger: dispara jobs pela hora BRT do ``scheduledTime``."""
         worker_runtime.attach(env)
         hour = worker_runtime.brt_hour(controller.scheduledTime)
-        logger.warning("Cron Trigger %s → %02dh BRT", controller.cron, hour)
+        logger.warning("Cron Trigger %s  %02dh BRT", controller.cron, hour)
 
         if hour in ALERT_SCHEDULE_HOURS:
             try:
