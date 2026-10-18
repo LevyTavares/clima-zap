@@ -7,6 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ROOT_DIR = Path(__file__).resolve().parents[3]
 ROOT_ENV = ROOT_DIR / ".env"
 
+# Valores default/placeholder que nunca devem valer em produção
+# (EVOLUTION_API_KEY, POSTGRES_PASSWORD do Compose).
+INSECURE_SECRETS = frozenset(
+    {"", "changeme", "evolution_pass", "troque-esta-chave", "troque-esta-senha"}
+)
+
 
 class Settings(BaseSettings):
     # Application basics
@@ -31,6 +37,10 @@ class Settings(BaseSettings):
     docs_dir: str = ""
     database_url: SecretStr = SecretStr("sqlite+aiosqlite:///./clima_zap.db")
     database_ssl: bool = False
+    # Origens liberadas no CORS, separadas por vírgula (ex.:
+    # "https://clima-zap.vercel.app"). Vazio = nenhuma origem cross-origin.
+    # O curinga `*` é descartado de propósito — veja `parse_cors_origins`.
+    cors_origins: str = ""
 
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV,
@@ -38,8 +48,53 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @property
+    def is_production(self) -> bool:
+        """True quando ``ENVIRONMENT`` aponta para produção."""
+        return self.environment.strip().lower() in ("production", "prod")
+
+    def production_warnings(self) -> list[str]:
+        """Configs inseguras que ficaram ativas em produção.
+
+        Fora de produção retorna lista vazia: os defaults de desenvolvimento
+        (localhost, chave placeholder) são esperados e não geram ruído.
+        """
+        if not self.is_production:
+            return []
+        warnings: list[str] = []
+        if not self.webhook_auth_token:
+            warnings.append(
+                "WEBHOOK_AUTH_TOKEN vazio: o webhook recusa requisições em "
+                "produção (`wrangler secret put WEBHOOK_AUTH_TOKEN`)"
+            )
+        if self.evolution_api_key.strip().lower() in INSECURE_SECRETS:
+            warnings.append(
+                "EVOLUTION_API_KEY com valor default/placeholder: troque antes "
+                "de usar (ex.: `openssl rand -hex 32`)"
+            )
+        if not self.evolution_api_url.lower().startswith("https://"):
+            warnings.append(
+                f"EVOLUTION_API_URL sem HTTPS ({self.evolution_api_url}): a API "
+                "key trafega nesse host — exponha a Evolution por HTTPS público"
+            )
+        return warnings
+
 
 settings = Settings()
+
+
+def parse_cors_origins(raw: str) -> list[str]:
+    """``CORS_ORIGINS`` (vírgula) → lista de origens; vazio = sem CORS.
+
+    ``*`` é descartado de propósito: o middleware do Starlette resolve a lista
+    no import, e um curinga silencioso esconderia configuração errada em
+    produção — liste as origens explicitamente.
+    """
+    return [
+        origin.strip()
+        for origin in raw.split(",")
+        if origin.strip() and origin.strip() != "*"
+    ]
 
 
 def normalized_database_url(database_url: str) -> str:

@@ -348,6 +348,7 @@ def test_webhook_native_mention_runs_command(monkeypatch):
 
 
 def test_webhook_open_when_token_unset(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "development")
     monkeypatch.setattr(settings, "webhook_auth_token", "")
 
     response = client.post(
@@ -355,6 +356,17 @@ def test_webhook_open_when_token_unset(monkeypatch):
     )
 
     assert response.status_code == 200
+
+
+def test_webhook_fail_closed_without_token_in_production(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "webhook_auth_token", "")
+
+    response = client.post(
+        "/api/v1/webhook", json={"event": "PING", "instance": "clima-zap"}
+    )
+
+    assert response.status_code == 503
 
 
 def test_webhook_requires_bearer_token_when_configured(monkeypatch):

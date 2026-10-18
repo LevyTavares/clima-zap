@@ -3,7 +3,6 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from evolution_api import EvolutionError
 from sqlalchemy import text
@@ -15,6 +14,7 @@ from app.api.webhook import router as webhook_router
 from app.api.subscription import router as subscription_router
 from app.core import worker_runtime
 from app.core.config import ROOT_DIR, settings
+from app.core.cors import SettingsCORSMiddleware
 from app.core.location import CRAJUBAR_LOCATIONS, match_city
 from app.core.schedule import (
     ALERT_SCHEDULE_HOURS,
@@ -124,6 +124,8 @@ async def lifespan(_: FastAPI):
         # APScheduler aqui.
         yield
         return
+    for warning in settings.production_warnings():
+        logger.warning("Config insegura em produção: %s", warning)
     scheduler.add_job(
         process_scheduled_weather_alerts,
         trigger="cron",
@@ -153,9 +155,9 @@ app = FastAPI(
 )
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    # Origens vêm de CORS_ORIGINS (lidas por request); sem curinga e sem
+    # credenciais — a API não usa cookies.
+    SettingsCORSMiddleware,
     allow_methods=["*"],
     allow_headers=["*"],
 )

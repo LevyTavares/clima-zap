@@ -286,12 +286,22 @@ async def receive_webhook(
     """
     Receive WhatsApp webhook from Evolution API.
 
-    SECURITY: quando WEBHOOK_AUTH_TOKEN está definido, exige
-    `Authorization: Bearer <token>` (configure como header customizado no
-    webhook da instância da Evolution API).
+    SECURITY: exige `Authorization: Bearer <token>` (configure como header
+    customizado no webhook da instância da Evolution API) sempre que
+    WEBHOOK_AUTH_TOKEN estiver definido. Em produção o token é obrigatório:
+    sem ele o endpoint devolve 503 em vez de aceitar eventos forjados.
     """
     expected = settings.webhook_auth_token
-    if expected:
+    if not expected:
+        if settings.is_production:
+            logger.error(
+                "Webhook recusado: WEBHOOK_AUTH_TOKEN não configurado em produção"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Webhook auth not configured",
+            )
+    else:
         provided = authorization.encode("utf-8")
         wanted = f"Bearer {expected}".encode("utf-8")
         if not secrets.compare_digest(provided, wanted):

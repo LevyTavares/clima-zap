@@ -16,6 +16,7 @@ No caminho Docker (CPython) nada disso é ativado: o APScheduler e o
 SQLAlchemy continuam responsáveis pelos agendamentos e pela persistência.
 """
 
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from app.core.config import settings
 
 # Estado do isolate: env do Workers (binding) quando presente.
 _STATE: dict[str, object] = {}
+
+logger = logging.getLogger(__name__)
 
 # Chaves de Settings sincronizadas a partir das vars/secrets do Worker.
 # Nomes iguais aos env vars usados no caminho Docker (.env).
@@ -46,6 +49,7 @@ SYNCED_KEYS = (
     "docs_dir",
     "database_url",
     "database_ssl",
+    "cors_origins",
 )
 
 # America/Fortaleza = UTC-3 o ano todo (DST extinto no Brasil desde 2019).
@@ -87,6 +91,8 @@ def attach(env: object) -> None:
         else:
             setattr(settings, key, text)
         os.environ[key] = text
+    for warning in settings.production_warnings():
+        logger.warning("Config insegura em produção: %s", warning)
 
 
 def on_workers() -> bool:
