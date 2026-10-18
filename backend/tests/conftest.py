@@ -7,11 +7,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from unittest.mock import patch
 
+import app.api.api as weather_api
 import app.db.session as db_session
 from app.db.base import Base
 
 # Importe a instância real do seu app FastAPI
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _limpa_cache_de_clima():
+    """O cache do Open-Meteo (app.api.api) é estado do processo: isolamos."""
+    weather_api.clear_weather_cache()
+    yield
+    weather_api.clear_weather_cache()
 
 @pytest.fixture
 def client():
