@@ -30,9 +30,9 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **API REST** com health checks (`/`, `/health`, `/api/v1/clima/ping`)
 - **Previsão em tempo real** da região do Cariri com geração de alertas (`/api/v1/clima/cariri`)
 - **Motor de regras** de alerta preventivo (UV, umidade, chuva) com mensagens formatadas em Markdown de WhatsApp
-- **Alertas agendados** via APScheduler — 6 verificações diárias (06h, 08h, 12h, 14h, 16h, 18h — fuso `America/Fortaleza`)
+- **Alertas agendados** — 6 verificações diárias (06h, 08h, 12h, 14h, 16h, 18h — fuso `America/Fortaleza`): APScheduler no Docker, Cron Triggers no Workers
 - **Boletim periódico no grupo WhatsApp** — 3×/dia (manhã 06h, tarde 14h, noite 20h) com jitter 0–15min, alvo via `FORECAST_GROUP_JID`
-- **Webhook do WhatsApp** (`POST /api/v1/webhook`) com processamento assíncrono (`BackgroundTasks`), normalização de eventos e deduplicação de mensagens (TTL 5 min)
+- **Webhook do WhatsApp** (`POST /api/v1/webhook`) com processamento assíncrono — `BackgroundTasks` no Docker e `ctx.waitUntil` no Workers (a Evolution recebe o `200` antes do processamento) —, normalização de eventos e deduplicação de mensagens (TTL 5 min)
 - **Bot de WhatsApp** com gramática estrita — comandos só valem como `/comando` ou `@clima-zap comando`: `ajuda`, `status`, `clima`, `configuracao`, `cidade`, `inscrever`, `sair` (em grupo só responde a comandos; no privado, dica única)
 - **Envio de mensagens** pelo WhatsApp via Evolution API (SDK `evolution-whatsapp`)
 - **Verificação de sessão** do WhatsApp (`/instance/connectionState`)
@@ -41,6 +41,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Stack Docker Compose completa** — PostgreSQL + Redis + Evolution API + Backend + Frontend
 - **CI com GitHub Actions** executando a suíte de testes
 - **Persistência de assinantes e alertas** com SQLAlchemy assíncrono, SQLite/PostgreSQL e migrations Alembic
+- **Cache curto (10 min)** por local nas consultas à Open-Meteo e **retenção de 90 dias** do histórico de envios (`alert_logs`)
 
 ---
 
@@ -135,7 +136,7 @@ clima-zap/
 │   ├── alembic/                  # Histórico versionado de schema
 │   ├── worker.py                 # Entrypoint Workers (ASGI + Cron Triggers)
 │   ├── wrangler.jsonc            # Config do Worker (crons, D1, assets)
-│   ├── pyproject.toml            # Deps do bundle Workers (Pyodide)
+│   ├── pyproject.toml            # Deps do bundle Workers (Pyodide, sem SQLAlchemy/APScheduler)
 │   ├── migrations/               # Migrations D1 (SQL)
 │   └── tests/                    # Suíte principal
 │       ├── conftest.py
@@ -325,6 +326,12 @@ O backend roda como **Python Worker** (FastAPI nativo via ASGI, GA desde set/202
 A aplicação é **dual-mode**: no caminho Docker nada muda ( SQLAlchemy + APScheduler
 continuam no ar); no Workers, `app/core/worker_runtime.py` detecta o isolate e
 troca persistência para D1 e agendamento para Cron Triggers.
+
+O bundle do Worker **não empacota** SQLAlchemy, APScheduler e `tzdata` (~8 MiB a
+menos): esses pacotes vivem só no caminho Docker (`requirements.txt`) e são
+alcançados por import tardio em `app/db/orm.py` — o modelo compartilhado entre os
+dois caminhos é a dataclass de `app/domain.py`. `tests/test_worker_bundle.py`
+falha se algum deles voltar ao grafo de imports do Worker.
 
 ### Deploy
 
@@ -600,6 +607,10 @@ Pipeline **Clima-Zap CI Pipeline** (`.github/workflows/ci.yml`):
 - **Job `workers-bundle`** (garante que o Worker continua empacotável para Python Workers):
   1. `uvx --from workers-py pywrangler sync` (deps Pyodide)
   2. `npx wrangler deploy --dry-run` (valida o bundle)
+
+Além disso, a suíte cobre duas fronteiras que só quebrariam em produção:
+`tests/test_worker_bundle.py` (nada de SQLAlchemy/APScheduler/`tzdata` no grafo do
+Worker) e `tests/test_storage_schema.py` (as migrations do D1 espelham o ORM).
 
 Pipeline de CD (`.github/workflows/cd.yml`):
 
