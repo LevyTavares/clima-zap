@@ -12,7 +12,7 @@ vars e secrets) que precisamos expor para o restante da aplicação:
 - ``brt_hour(ms)``: hora de Fortaleza (UTC-3 fixo, sem DST desde 2019) a
   partir do ``scheduledTime`` (epoch ms) de um Cron Trigger.
 
-No caminho Docker/Render (CPython) nada disso é ativado: o APScheduler e o
+No caminho Docker (CPython) nada disso é ativado: o APScheduler e o
 SQLAlchemy continuam responsáveis pelos agendamentos e pela persistência.
 """
 

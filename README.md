@@ -82,7 +82,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 | Reverse Proxy (frontend) | nginx 1.27 |
 | CI/CD | GitHub Actions |
 | Banco de Dados (aplicação) | SQLite local / PostgreSQL via SQLAlchemy (Docker) · Cloudflare D1 (Workers) |
-| Hospedagem backend | Cloudflare Workers (Python Workers + D1 + Cron Triggers) — Docker/Render como alternativa |
+| Hospedagem backend | Cloudflare Workers (Python Workers + D1 + Cron Triggers) — Docker como alternativa |
 | Provedor Metereológico | Open-Meteo API (sem API key) |
 
 ---
@@ -95,7 +95,8 @@ clima-zap/
 ├── .env.example                  # Template único de env (Compose + backend)
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                # Pipeline CI (Pytest, Python 3.11)
+│       ├── ci.yml                # Pipeline CI (testes, lint, migrations, Docker, bundle Workers)
+│       └── cd.yml                # Pipeline CD (deploy no Cloudflare Workers)
 ├── .dockerignore
 ├── .gitignore
 ├── AGENTS.md                     # Contexto do projeto para agentes de IA
@@ -301,7 +302,7 @@ npm run preview   # Preview do build
 
 ### Fluxo do Scheduler
 
-- `AsyncIOScheduler` com fuso `America/Fortaleza` (caminho Docker/Render)
+- `AsyncIOScheduler` com fuso `America/Fortaleza` (caminho Docker)
 - Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, envia aos assinantes ativos e registra o resultado em `alert_logs`
 - Jobs `forecast_morning` / `forecast_afternoon` / `forecast_night`: horas `6, 14, 20`, `jitter=900` (0–15min) — montam boletim por período e **enviam** para `FORECAST_GROUP_JID` (só registram se o JID estiver setado)
 - No Cloudflare Workers o mesmo fluxo roda via **Cron Triggers** (ver seção seguinte), com o mesmo jitter 0–15min: cada expressão dispara só o job dela e o boletim dorme o sorteio dentro do handler `scheduled()`
@@ -312,7 +313,7 @@ npm run preview   # Preview do build
 
 O backend roda como **Python Worker** (FastAPI nativo via ASGI, GA desde set/2026):
 
-| Docker/Render | Cloudflare Workers |
+| Docker | Cloudflare Workers |
 |---------------|--------------------|
 | FastAPI + Uvicorn | FastAPI via ASGI server do Workers (`workers.asgi.entrypoint`) |
 | APScheduler (cron local) | Cron Triggers (UTC) + handler `scheduled()` em `backend/worker.py` |
@@ -553,22 +554,24 @@ Stack: `pytest` + `fastapi.testclient` + `unittest.mock` / `monkeypatch`.
 Pipeline **Clima-Zap CI Pipeline** (`.github/workflows/ci.yml`):
 
 - **Gatilhos:** push (todas as branches) e PR para `main`
-- **Runner:** `ubuntu-latest`, Python **3.11**
-- **Passos:**
-  1. Checkout do código
-  2. Setup Python 3.11
-  3. `pip install -r requirements.txt`
-  4. `cd backend && PYTHONPATH=. python -m pytest`
+- **Runner:** `ubuntu-latest`
+- **Job `build-and-test`** (Python 3.11):
+  1. Checkout, setup Python 3.11 e `pip install -r requirements.txt`
+  2. Suíte de testes: `cd backend && PYTHONPATH=. python -m pytest`
+  3. Qualidade: `python -m pylint backend`
+  4. Migrations: `alembic upgrade head` + `alembic check` (SQLite)
+  5. `docker compose config` + build das imagens `backend` e `frontend`
+- **Job `workers-bundle`** (garante que o Worker continua empacotável para Python Workers):
+  1. `uvx --from workers-py pywrangler sync` (deps Pyodide)
+  2. `npx wrangler deploy --dry-run` (valida o bundle)
 
 Pipeline de CD (`.github/workflows/cd.yml`):
 
-- Executa em push para `main` ou manualmente via `workflow_dispatch`.
-- Dispara o Render por `RENDER_DEPLOY_HOOK_URL` no environment `production`.
-- Opcionalmente verifica `/health` usando `RENDER_SERVICE_URL`.
-- O blueprint [`render.yaml`](render.yaml) cria a API Docker e um PostgreSQL gerenciado.
-- `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` e `EVOLUTION_INSTANCE_NAME` devem ser cadastrados como secrets/env vars no Render. O provedor Evolution precisa estar disponível publicamente; o Compose local continua incluindo a Evolution API.
+- Executa em push para `main` ou manualmente via `workflow_dispatch`, com `concurrency` para não sobrepor deploys.
+- Sincroniza as deps Pyodide (`pywrangler sync`), aplica as migrations do D1 (`wrangler d1 migrations apply --remote`) e faz deploy via `pywrangler deploy`.
+- Opcionalmente faz polling em `WORKERS_SERVICE_URL/health` (até 5 min) após o deploy.
 
-Para ativar o CD: crie o serviço a partir de `render.yaml`, gere um Deploy Hook no Render e cadastre `RENDER_DEPLOY_HOOK_URL` e `RENDER_SERVICE_URL` no environment `production` do GitHub.
+Para ativar o CD: crie um [API Token](https://dash.cloudflare.com/profile/api-tokens) com permissão **Account → Workers Scripts → Edit** e **D1 → Edit**, e cadastre `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` no environment `production` do GitHub. Opcionalmente cadastre `WORKERS_SERVICE_URL=https://clima-zap-api.<subdominio>.workers.dev` para ativar o health check.
 
 ---
 
@@ -592,7 +595,7 @@ Para ativar o CD: crie o serviço a partir de `render.yaml`, gere um Deploy Hook
 - [ ] Estilos SCSS modulares (`*.module.scss` + `_variables.scss`)
 - [ ] Router no frontend (react-router)
 - [ ] Migrar a aplicação para PostgreSQL gerenciado (Neon/Supabase), se necessário
-- [x] Configuração de deploy Docker no Render e workflow de CD
+- [x] Deploy do backend no Cloudflare Workers (D1 + Cron Triggers) e workflow de CD para Workers
 - [ ] Broadcast via `TARGET_PHONE_NUMBER`
 - [ ] Lint/format (ruff, ESLint, Prettier)
 - [ ] LICENSE

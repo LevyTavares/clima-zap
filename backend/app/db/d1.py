@@ -1,7 +1,7 @@
 """Adaptador D1 (SQLite no Cloudflare Workers) para as operações de persistência.
 
 Espelha, em SQL puro, o que ``app.services.persistence`` e
-``app.services.alert_history`` fazem via SQLAlchemy no caminho Docker/Render.
+``app.services.alert_history`` fazem via SQLAlchemy no caminho Docker.
 As funções só são alcançadas quando ``worker_runtime.on_workers()`` é True
 (env do Worker anexado com o binding ``DB``).
 

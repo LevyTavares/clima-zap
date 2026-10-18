@@ -1,6 +1,6 @@
 """Histórico de envios de alertas/boletins (alert_logs).
 
-Dois backends, mesma API: SQLAlchemy (Docker/Render) ou D1 (Workers) —
+Dois backends, mesma API: SQLAlchemy (Docker) ou D1 (Workers) —
 o interruptor é ``worker_runtime.on_workers()``.
 """
 

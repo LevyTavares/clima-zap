@@ -5,7 +5,7 @@ from app.core.worker_runtime import is_workers_runtime
 
 # No Cloudflare Workers (Pyodide) não existe greenlet/aiosqlite utilizáveis e o
 # banco é o D1 (app/db/d1.py) — então o SQLAlchemy assíncrono (engine, sessões
-# e até o import de sqlalchemy.ext.asyncio) só existe no caminho Docker/Render.
+# e até o import de sqlalchemy.ext.asyncio) só existe no caminho Docker.
 if is_workers_runtime():  # pragma: no cover - apenas no workerd
     engine = None
     SessionLocal = None
@@ -26,7 +26,7 @@ else:
 
 
 async def get_db() -> AsyncIterator:
-    """Sessão SQLAlchemy (Docker/Render) ou None (Workers usam D1)."""
+    """Sessão SQLAlchemy (Docker) ou None (Workers usam D1)."""
     if SessionLocal is None:  # pragma: no cover - apenas no workerd
         yield None
         return

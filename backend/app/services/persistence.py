@@ -6,7 +6,7 @@ bot (`/inscrever`, `/sair`, `/configuracao`, `/cidade`) e pelo webhook
 
 Dois backends, mesma API:
 
-- CPython (Docker/Render): SQLAlchemy em sessões próprias, no mesmo padrão
+- CPython (Docker): SQLAlchemy em sessões próprias, no mesmo padrão
   de `app.services.alert_history`.
 - Cloudflare Workers: fast-path em D1 (`app/db/d1.py`), ativado quando o
   env do Worker foi anexado (`worker_runtime.on_workers()`).
