@@ -9,7 +9,7 @@ import asyncio
 import logging
 import sys
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -134,6 +134,8 @@ class FakeD1:
             self.alert_logs.append(
                 {
                     "id": self._next_id,
+                    # default da tabela no D1: datetime('now') em UTC
+                    "sent_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     "alert_type": params[0],
                     "recipient": params[1],
                     "delivery_status": params[2],
@@ -142,6 +144,15 @@ class FakeD1:
             )
             self._next_id += 1
             changes = 1
+
+        elif sql.startswith("DELETE FROM alert_logs WHERE sent_at < datetime('now', ?)"):
+            dias = int(params[0].split()[0])
+            cutoff = (datetime.now(timezone.utc) + timedelta(days=dias)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            mantidos = [log for log in self.alert_logs if log["sent_at"] >= cutoff]
+            changes = len(self.alert_logs) - len(mantidos)
+            self.alert_logs = mantidos
 
         elif sql.startswith("INSERT OR IGNORE INTO seen_messages"):
             if params[0] in self.seen:
@@ -342,6 +353,18 @@ def test_dedupe_first_seen_then_duplicate(workers_env):  # pylint: disable=unuse
 
 def test_d1_ping(workers_env):  # pylint: disable=unused-argument
     asyncio.run(d1.ping())  # não deve levantar exceção
+
+
+def test_prune_alert_logs_via_d1(workers_env):
+    async def flow():
+        await alert_history.record_alert_dispatch("weather_alert", "+5588", "sent")
+        await alert_history.record_alert_dispatch("weather_alert", "+5599", "sent")
+        # envelhece o primeiro: o prune por retenção deve levar só ele
+        workers_env.DB.alert_logs[0]["sent_at"] = "2020-01-01 00:00:00"
+        return await alert_history.prune_alert_logs(90)
+
+    assert asyncio.run(flow()) == 1
+    assert [log["recipient"] for log in workers_env.DB.alert_logs] == ["+5599"]
 
 
 # ---------------------------------------------------------------------------

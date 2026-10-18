@@ -7,7 +7,7 @@
   06/14/20h. Cada expressão dispara só o seu job (as duas coincidem em 06h e
   14h) e o boletim dorme o mesmo jitter anti-spam 0–15min do caminho Docker —
   por isso o sorteio respeita o limite de 15min de wall time do Cron Trigger
-  (``app.core.schedule``).
+  (``app.core.schedule``). Em 20h BRT roda também o purge do histórico.
 
 Deploy (a partir de backend/): ``uv run pywrangler deploy`` — veja README.
 """
@@ -29,6 +29,7 @@ from app.core.schedule import (  # noqa: E402  pylint: disable=wrong-import-posi
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_BY_HOUR,
+    MAINTENANCE_HOUR,
     cron_dispatch,
     jitter_delay_seconds,
 )
@@ -36,6 +37,9 @@ from app.main import (  # noqa: E402  pylint: disable=wrong-import-position
     app,
     process_scheduled_weather_alerts,
     send_period_forecast,
+)
+from app.services.alert_history import (  # noqa: E402  pylint: disable=wrong-import-position
+    prune_alert_logs,
 )
 from app.services.forecast import Period  # noqa: E402  pylint: disable=wrong-import-position
 
@@ -62,9 +66,21 @@ class Default(_AsgiEntrypoint):
         if alerts_due and hour in ALERT_SCHEDULE_HOURS:
             await self._send_alerts(hour)
 
+        if hour == MAINTENANCE_HOUR:
+            await self._prune_history()
+
         period = FORECAST_PERIOD_BY_HOUR.get(hour) if bulletins_due else None
         if period is not None:
             await self._send_bulletin(period)
+
+    @staticmethod
+    async def _prune_history() -> None:
+        """Purge diária do histórico de envios (retenção de 90 dias)."""
+        try:
+            removed = await prune_alert_logs()
+            logger.warning("Purge do histórico: %s linha(s) removida(s)", removed)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Erro no purge do histórico: %s", error)
 
     @staticmethod
     async def _send_alerts(hour: int) -> None:

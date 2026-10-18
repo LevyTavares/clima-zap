@@ -29,6 +29,11 @@ FORECAST_PERIOD_BY_HOUR: dict[int, Period] = {
     hour: period for _, hour, period in FORECAST_PERIOD_JOBS
 }
 
+# Manutenção diária (purge do histórico de alert_logs). 20h BRT só é atingida
+# pela expressão dos boletins — ver ``cron_dispatch`` —, então o job não colide
+# com os alertas.
+MAINTENANCE_HOUR = 20
+
 # Expressões em `triggers.crons` do wrangler.jsonc (em UTC). Os dois crons
 # coincidem em 06h e 14h BRT — ver ``cron_dispatch``.
 ALERTS_CRON = "0 9,11,15,17,19,21 * * *"

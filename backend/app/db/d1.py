@@ -168,6 +168,18 @@ async def record_alert_dispatch(
     ).bind(alert_type, recipient, delivery_status[:32], subscriber_id).run()
 
 
+async def prune_alert_logs(days: int) -> int:
+    """Apaga alert_logs mais antigos que ``days``; devolve quantas linhas saíram.
+
+    ``sent_at`` é gravado em UTC por ``datetime('now')`` (default da tabela), então
+    o modificador do SQLite (``'-90 days'``) compara direto.
+    """
+    result = await _db().prepare(
+        "DELETE FROM alert_logs WHERE sent_at < datetime('now', ?)"
+    ).bind(f"-{int(days)} days").run()
+    return _changes(result)
+
+
 async def is_duplicate_message(message_id: str) -> bool:
     """Marca message_id como visto; True se já havia sido visto (duplicado)."""
     database = _db()

@@ -18,12 +18,13 @@ from app.core.schedule import (
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_JOBS,
+    MAINTENANCE_HOUR,
 )
 from app.db import d1
 from app.db.errors import storage_errors
 from app.db.session import get_db
 from app.services.alerts import generate_weather_alerts
-from app.services.alert_history import record_alert_dispatch
+from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
 from app.services.persistence import group_active_subscribers_by_city, resolve_group_location
@@ -102,6 +103,24 @@ async def send_period_forecast(period: Period) -> None:
         log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
 
 
+def register_maintenance_job() -> None:
+    """Registra o prune diário do histórico (alert_logs) — só no Docker.
+
+    No Workers ele roda pelo Cron Trigger das 20h BRT (``backend/worker.py``).
+    """
+    active_scheduler = scheduler
+    if active_scheduler is None:
+        return
+    active_scheduler.add_job(
+        prune_alert_logs,
+        trigger="cron",
+        hour=MAINTENANCE_HOUR,
+        minute=0,
+        id="prune_alert_logs",
+        replace_existing=True,
+    )
+
+
 def register_forecast_jobs() -> None:
     """Registra os 3 jobs de boletim — só se grupo configurado."""
     log = logging.getLogger("uvicorn.error")
@@ -147,6 +166,8 @@ async def lifespan(_: FastAPI):
         id="scheduled_weather_alerts",
         replace_existing=True,
     )
+    # Retenção do histórico: um prune por dia, na hora do boletim da noite.
+    register_maintenance_job()
     register_forecast_jobs()
     active_scheduler.start()
     try:

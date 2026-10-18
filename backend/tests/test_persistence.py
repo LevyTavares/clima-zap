@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from evolution_api import EvolutionConnectionError
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 import app.main as main_module
-from app.services import persistence, weather_dispatch
+from app.services import alert_history, persistence, weather_dispatch
 from app.services.persistence import resolve_group_location
 from app.main import app
 from app.models import AlertLog, Subscriber
@@ -195,3 +196,44 @@ def test_resolve_group_location_prefers_coords_then_preset():
     assert preset["latitude"] == pytest.approx(-7.2342)
 
     assert resolve_group_location("", [Subscriber(phone="+15550000000")]) is None
+
+
+# ---------------------------------------------------------------------------
+# Retenção do histórico (alert_logs) — roda todo dia às 20h BRT
+# ---------------------------------------------------------------------------
+
+
+def test_prune_alert_logs_remove_apenas_os_antigos(test_database):
+    antigo = datetime.now(timezone.utc) - timedelta(days=120)
+
+    async def flow():
+        async with test_database() as session:
+            session.add(
+                AlertLog(
+                    alert_type="weather_alert",
+                    recipient="+15551110000",
+                    delivery_status="sent",
+                    sent_at=antigo,
+                )
+            )
+            session.add(
+                AlertLog(
+                    alert_type="weather_alert",
+                    recipient="+15552220000",
+                    delivery_status="sent",
+                )
+            )
+            await session.commit()
+
+        removidos = await alert_history.prune_alert_logs(90)
+
+        async with test_database() as session:
+            result = await session.execute(select(AlertLog))
+            sobrou = [log.recipient for log in result.scalars()]
+
+        return removidos, sobrou
+
+    removidos, sobrou = asyncio.run(flow())
+
+    assert removidos == 1
+    assert sobrou == ["+15552220000"]

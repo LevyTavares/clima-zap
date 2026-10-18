@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.core.schedule import MAINTENANCE_HOUR
 from app.main import (
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_JOBS,
@@ -42,6 +43,22 @@ def test_scheduled_weather_alerts_hours():
 
         assert job is not None
         assert str(job.trigger.fields[5]) == ",".join(map(str, ALERT_SCHEDULE_HOURS))
+
+
+def test_prune_do_historico_agendado_na_hora_de_manutencao():
+    # reset scheduler state for isolation
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+    scheduler.remove_all_jobs()
+
+    main_module.register_maintenance_job()
+
+    job = scheduler.get_job("prune_alert_logs")
+    assert job is not None
+    assert str(job.trigger.fields[5]) == str(MAINTENANCE_HOUR)
+    assert str(job.trigger.fields[6]) == "0"
+
+    scheduler.remove_all_jobs()
 
 
 def test_scheduled_weather_alerts_process(monkeypatch, caplog):

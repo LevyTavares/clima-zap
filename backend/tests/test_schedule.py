@@ -84,3 +84,9 @@ def test_horas_utc_dos_crons_equivalem_as_horas_brt():
     assert _utc_to_brt(_cron_hours(schedule.BULLETINS_CRON)) == sorted(
         schedule.FORECAST_PERIOD_BY_HOUR
     )
+
+
+def test_manutencao_pega_carona_na_hora_exclusiva_dos_boletins():
+    """O purge diário (20h BRT) não pode coincidir com uma hora de alertas."""
+    assert schedule.MAINTENANCE_HOUR in schedule.FORECAST_PERIOD_BY_HOUR
+    assert schedule.MAINTENANCE_HOUR not in schedule.ALERT_SCHEDULE_HOURS
