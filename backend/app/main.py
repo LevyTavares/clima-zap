@@ -16,6 +16,11 @@ from app.api.subscription import router as subscription_router
 from app.core import worker_runtime
 from app.core.config import ROOT_DIR, settings
 from app.core.location import CRAJUBAR_LOCATIONS, match_city
+from app.core.schedule import (
+    ALERT_SCHEDULE_HOURS,
+    FORECAST_JITTER_SECONDS,
+    FORECAST_PERIOD_JOBS,
+)
 from app.db import d1
 from app.db.session import get_db
 from app.services.alerts import generate_weather_alerts
@@ -29,22 +34,9 @@ from app.services.weather_dispatch import dispatch_weather_alerts
 DOCS_DIR = Path(settings.docs_dir) if settings.docs_dir else ROOT_DIR / "docs"
 
 logger = logging.getLogger(__name__)
-ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
+# Horas, jitter dos jobs e expressões de cron vivem em `app.core.schedule` —
+# fonte única compartilhada com os Cron Triggers do Workers (backend/worker.py).
 scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
-
-# Boletim periódico: manhã / tarde / noite — jitter 0–15min anti-spam
-FORECAST_PERIOD_JOBS: list[tuple[str, int, Period]] = [
-    ("forecast_morning", 6, "morning"),
-    ("forecast_afternoon", 14, "afternoon"),
-    ("forecast_night", 20, "night"),
-]
-FORECAST_JITTER_SECONDS = 900  # 15min
-
-# Hora BRT → período do boletim (usado pelos Cron Triggers do Workers,
-# que disparam sem jitter).
-FORECAST_PERIOD_BY_HOUR: dict[int, Period] = {
-    hour: period for _, hour, period in FORECAST_PERIOD_JOBS
-}
 
 
 async def process_scheduled_weather_alerts() -> None:

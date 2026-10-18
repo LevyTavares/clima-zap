@@ -117,7 +117,9 @@ clima-zap/
 │   │   │   ├── api.py            # Cliente Open-Meteo (fetch_cariri_weather)
 │   │   │   └── webhook.py        # Webhook WhatsApp + roteador de comandos
 │   │   ├── core/
-│   │   │   └── config.py         # Settings (pydantic-settings)
+│   │   │   ├── config.py         # Settings (pydantic-settings)
+│   │   │   ├── schedule.py       # Horas, jitter e crons (Docker + Workers)
+│   │   │   └── worker_runtime.py # Bridge do runtime Workers (D1, brt_hour)
 │   │   ├── schemas/
 │   │   │   ├── schemas.py        # WeatherData / CurrentWeather / DailyWeather / HourlyWeather
 │   │   │   └── webhook.py        # WebhookPayload
@@ -302,7 +304,7 @@ npm run preview   # Preview do build
 - `AsyncIOScheduler` com fuso `America/Fortaleza` (caminho Docker/Render)
 - Job `scheduled_weather_alerts` via cron: horas `6, 8, 12, 14, 16, 18` (minuto 0) — busca clima, gera alertas, envia aos assinantes ativos e registra o resultado em `alert_logs`
 - Jobs `forecast_morning` / `forecast_afternoon` / `forecast_night`: horas `6, 14, 20`, `jitter=900` (0–15min) — montam boletim por período e **enviam** para `FORECAST_GROUP_JID` (só registram se o JID estiver setado)
-- No Cloudflare Workers o mesmo fluxo roda via **Cron Triggers** (ver seção seguinte), sem jitter
+- No Cloudflare Workers o mesmo fluxo roda via **Cron Triggers** (ver seção seguinte), com o mesmo jitter 0–15min: cada expressão dispara só o job dela e o boletim dorme o sorteio dentro do handler `scheduled()`
 
 ---
 
@@ -316,7 +318,7 @@ O backend roda como **Python Worker** (FastAPI nativo via ASGI, GA desde set/202
 | APScheduler (cron local) | Cron Triggers (UTC) + handler `scheduled()` em `backend/worker.py` |
 | SQLite / PostgreSQL (SQLAlchemy) | Cloudflare D1 (`app/db/d1.py`, schema em `backend/migrations/`) |
 | `.env` / ambiente | `vars` + `wrangler secret put` (sincronizados em `settings` pelo middleware) |
-| Jitter anti-spam 0–15min | Sem jitter (isolate não dorme barato) |
+| Jitter anti-spam 0–15min | Mesmo jitter, sorteado no handler `scheduled()` (`app/core/schedule.py`) dentro do limite de 15min de wall time do Cron Trigger |
 
 A aplicação é **dual-mode**: no caminho Docker nada muda ( SQLAlchemy + APScheduler
 continuam no ar); no Workers, `app/core/worker_runtime.py` detecta o isolate e
@@ -352,7 +354,10 @@ uvx --from workers-py pywrangler deploy
 
 - **Webhook da Evolution:** `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
 - **Cron Triggers:** alertas `0 9,11,15,17,19,21 * * *` (06/08/12/14/16/18h BRT) e
-  boletins `0 9,17,23 * * *` (06/14/20h BRT) — America/Fortaleza = UTC-3 fixo
+  boletins `0 9,17,23 * * *` (06/14/20h BRT) — America/Fortaleza = UTC-3 fixo.
+  Cada expressão dispara só o job dela (as duas coincidem em 06h/14h BRT, sem
+  isso os envios duplicariam) e o boletim aguarda o jitter anti-spam 0–15min
+  antes do envio — expressões e jitter em `app/core/schedule.py`
 - **Docs markdown** (`/docs/whatsapp`, `/docs/docker`) são servidos dos Assets
   do Worker (diretório `docs/` no `wrangler.jsonc`)
 - **Dev local:** `uvx --from workers-py pywrangler dev` (workerd + D1 local;
@@ -526,6 +531,7 @@ Testes da suíte principal:
 | `tests/test_webhook.py` | 19 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta e autenticação `Bearer` |
 | `tests/test_d1_store.py` | 16 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
 | `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
+| `tests/test_schedule.py` | 7 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |
@@ -579,6 +585,7 @@ Para ativar o CD: crie o serviço a partir de `render.yaml`, gere um Deploy Hook
 ## 🗺️ Roadmap / Não implementado
 
 - [x] Boletim periódico 3×/dia no grupo (`FORECAST_GROUP_JID` — manhã 06h, tarde 14h, noite 20h, jitter 0–15min)
+- [x] Jitter anti-spam nos boletins no Cloudflare Workers (sorteio 0–15min no handler `scheduled`, limitado pelo wall time de 15min do Cron Trigger)
 - [x] Envio real de alertas agendados ao WhatsApp com histórico de sucesso/falha
 - [x] Verificação opcional do webhook via token (`WEBHOOK_AUTH_TOKEN` → `Authorization: Bearer`)
 - [ ] UI do frontend com dados climáticos em tempo real (componente hoje é placeholder)

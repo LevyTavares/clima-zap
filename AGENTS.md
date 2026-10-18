@@ -7,7 +7,7 @@ Sistema de monitoramento e alertas climáticos para a região do Cariri, consumi
 ## 🛠️ Stack Tecnológica
 
 - **Frontend:** React.js (construído com Vite), estilização em Sass (SCSS modular), hospedagem na Vercel.
-- **Backend:** Python 3.10+ com FastAPI, Pydantic v2, Uvicorn. Hospedagem primária em **Cloudflare Workers** (Python Workers + D1 + Cron Triggers — dual-mode com Docker/Render: SQLAlchemy/APScheduler no caminho CPython, adaptador D1 em `app/db/d1.py` + Cron Triggers em `backend/worker.py` no Workers).
+- **Backend:** Python 3.10+ com FastAPI, Pydantic v2, Uvicorn. Hospedagem primária em **Cloudflare Workers** (Python Workers + D1 + Cron Triggers — dual-mode com Docker: SQLAlchemy/APScheduler no caminho CPython, adaptador D1 em `app/db/d1.py` + Cron Triggers em `backend/worker.py` no Workers). Horas, jitter e expressões de cron são fonte única em `app/core/schedule.py` (o jitter roda dentro do handler `scheduled`, limitado ao wall time de 15min do Cron Trigger).
 - **Banco de Dados:** PostgreSQL (hospedado via Neon ou Supabase).
 - **APIs Externas:** Open-Meteo API (sem necessidade de API Key).
 

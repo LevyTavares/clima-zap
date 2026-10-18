@@ -1,33 +1,43 @@
 """Entrypoint do Cloudflare Workers: FastAPI (ASGI) + Cron Triggers.
 
-- Requests HTTP  a app FastAPI de ``app.main``; o env do Worker (bindings
-  D1/Assets e vars/secrets)  anexado por um middleware em ``app.main``.
-- Cron Triggers  os mesmos jobs do APScheduler, disparados pela hora BRT
+- Requests HTTP → a app FastAPI de ``app.main``; o env do Worker (bindings
+  D1/Assets e vars/secrets) é anexado por um middleware em ``app.main``.
+- Cron Triggers → os mesmos jobs do APScheduler, disparados pela hora BRT
   (UTC-3) do ``scheduledTime``: alertas 06/08/12/14/16/18h e boletins
-  06/14/20h. Sem jitter anti-spam (o isolate no dorme barato).
+  06/14/20h. Cada expressão dispara só o seu job (as duas coincidem em 06h e
+  14h) e o boletim dorme o mesmo jitter anti-spam 0–15min do caminho Docker —
+  por isso o sorteio respeita o limite de 15min de wall time do Cron Trigger
+  (``app.core.schedule``).
 
-Deploy (a partir de backend/): ``uv run pywrangler deploy``  veja README.
+Deploy (a partir de backend/): ``uv run pywrangler deploy`` — veja README.
 """
 
+import asyncio
 import logging
 
 import httpx._client as httpx_client
 from workers import asgi  # pylint: disable=import-error
 
 # O transporte httpx do Pyodide entrega corpo comprimido sem decodificar
-# (workerd fetch + pyfetch)  foramos `Accept-Encoding: identity` para todos
+# (workerd fetch + pyfetch) — forçamos `Accept-Encoding: identity` para todos
 # os clientes (os nossos e os do SDK evolution-whatsapp). Deve rodar antes de
 # qualquer httpx.Client/AsyncClient ser criado.
 httpx_client.ACCEPT_ENCODING = "identity"
 
 from app.core import worker_runtime  # noqa: E402  pylint: disable=wrong-import-position
-from app.main import (  # noqa: E402  pylint: disable=wrong-import-position
+from app.core.schedule import (  # noqa: E402  pylint: disable=wrong-import-position
     ALERT_SCHEDULE_HOURS,
+    FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_BY_HOUR,
+    cron_dispatch,
+    jitter_delay_seconds,
+)
+from app.main import (  # noqa: E402  pylint: disable=wrong-import-position
     app,
     process_scheduled_weather_alerts,
     send_period_forecast,
 )
+from app.services.forecast import Period  # noqa: E402  pylint: disable=wrong-import-position
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -42,20 +52,38 @@ class Default(_AsgiEntrypoint):
         return await super().fetch(request)
 
     async def scheduled(self, controller, env, ctx):  # pylint: disable=unused-argument
-        """Cron Trigger: dispara jobs pela hora BRT do ``scheduledTime``."""
+        """Cron Trigger: dispara os jobs devidos pela expressão e hora BRT."""
         worker_runtime.attach(env)
+        cron = (controller.cron or "").strip()
         hour = worker_runtime.brt_hour(controller.scheduledTime)
-        logger.warning("Cron Trigger %s  %02dh BRT", controller.cron, hour)
+        logger.warning("Cron Trigger %s → %02dh BRT", cron, hour)
 
-        if hour in ALERT_SCHEDULE_HOURS:
-            try:
-                await process_scheduled_weather_alerts()
-            except Exception as error:  # pylint: disable=broad-exception-caught
-                logger.error("Erro no job de alertas (%02dh BRT): %s", hour, error)
+        alerts_due, bulletins_due = cron_dispatch(cron)
+        if alerts_due and hour in ALERT_SCHEDULE_HOURS:
+            await self._send_alerts(hour)
 
-        period = FORECAST_PERIOD_BY_HOUR.get(hour)
+        period = FORECAST_PERIOD_BY_HOUR.get(hour) if bulletins_due else None
         if period is not None:
-            try:
-                await send_period_forecast(period)
-            except Exception as error:  # pylint: disable=broad-exception-caught
-                logger.error("Erro no boletim %s (%02dh BRT): %s", period, hour, error)
+            await self._send_bulletin(period)
+
+    @staticmethod
+    async def _send_alerts(hour: int) -> None:
+        """Alertas agendados — sem jitter, igual ao caminho Docker."""
+        try:
+            await process_scheduled_weather_alerts()
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Erro no job de alertas (%02dh BRT): %s", hour, error)
+
+    @staticmethod
+    async def _send_bulletin(period: Period) -> None:
+        """Aplica o jitter anti-spam e envia o boletim do período."""
+        delay = jitter_delay_seconds(FORECAST_JITTER_SECONDS)
+        if delay:
+            logger.warning(
+                "Boletim %s aguardando jitter anti-spam de %.0fs", period, delay
+            )
+            await asyncio.sleep(delay)
+        try:
+            await send_period_forecast(period)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Erro no boletim %s: %s", period, error)

@@ -1,0 +1,73 @@
+"""Agendamento dos jobs — fonte única para APScheduler (Docker) e Workers.
+
+Reúne o que os dois caminhos precisam compartilhar sem importar FastAPI nem o
+runtime do workerd (testável no CPython):
+
+- faixa de horas e jitter dos jobs (APScheduler e Cron Triggers);
+- hora BRT → período do boletim (Cron Triggers);
+- decisão de qual job cada expressão de cron do Worker dispara;
+- sorteio do atraso anti-spam, limitado pelo wall time de um Cron Trigger.
+"""
+
+import random
+
+from app.services.forecast import Period
+
+# Alertas: 06/08/12/14/16/18h BRT (America/Fortaleza = UTC-3, sem DST).
+ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
+
+# Boletim periódico: manhã / tarde / noite — jitter 0–15min anti-spam.
+FORECAST_PERIOD_JOBS: list[tuple[str, int, Period]] = [
+    ("forecast_morning", 6, "morning"),
+    ("forecast_afternoon", 14, "afternoon"),
+    ("forecast_night", 20, "night"),
+]
+FORECAST_JITTER_SECONDS = 900  # 15min
+
+# Hora BRT → período do boletim (usado pelos Cron Triggers do Workers).
+FORECAST_PERIOD_BY_HOUR: dict[int, Period] = {
+    hour: period for _, hour, period in FORECAST_PERIOD_JOBS
+}
+
+# Expressões em `triggers.crons` do wrangler.jsonc (em UTC). Os dois crons
+# coincidem em 06h e 14h BRT — ver ``cron_dispatch``.
+ALERTS_CRON = "0 9,11,15,17,19,21 * * *"
+BULLETINS_CRON = "0 9,17,23 * * *"
+CRON_EXPRESSIONS = (ALERTS_CRON, BULLETINS_CRON)
+
+# Cron Triggers têm 15min de wall time por invocação. O jitter dorme dentro do
+# próprio handler, então reservamos uma margem para o envio (HTTP + D1) caber
+# no limite mesmo quando o sorteio é o maior possível.
+CRON_WALL_TIME_LIMIT_SECONDS = 900
+CRON_JITTER_MARGIN_SECONDS = 60
+
+
+def jitter_delay_seconds(
+    max_seconds: int = FORECAST_JITTER_SECONDS,
+    rng: random.Random | None = None,
+) -> float:
+    """Atraso anti-spam sorteado em ``[0, max_seconds]`` (0 se desativado).
+
+    Espelha o ``jitter`` do APScheduler no caminho Docker, mas nunca passa do
+    wall time de um Cron Trigger menos a margem de segurança — o sleep
+    acontece no próprio handler ``scheduled``.
+    """
+    ceiling = min(
+        max_seconds, CRON_WALL_TIME_LIMIT_SECONDS - CRON_JITTER_MARGIN_SECONDS
+    )
+    if ceiling <= 0:
+        return 0.0
+    return (rng or random).uniform(0, ceiling)
+
+
+def cron_dispatch(cron: str) -> tuple[bool, bool]:
+    """Diz se a expressão ``cron`` deve disparar (alertas, boletins).
+
+    Sem esse despacho o handler rodaria duas vezes em 06h e 14h BRT (as duas
+    expressões coincidem nesses horários) duplicando alertas e boletins.
+    Expressões desconhecidas caem no despacho por hora, como antes.
+    """
+    cron = (cron or "").strip()
+    if cron not in CRON_EXPRESSIONS:
+        return True, True
+    return cron == ALERTS_CRON, cron == BULLETINS_CRON
