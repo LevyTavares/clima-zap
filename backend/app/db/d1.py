@@ -7,14 +7,15 @@ As funções só são alcançadas quando ``worker_runtime.on_workers()`` é True
 
 Conversão JS→Python: o FFI do Pyodide devolve ``JsProxy``; usamos ``to_py()``
 quando disponível (no Workers) e dicionários nativos passam direto (testes com
-fake). Os objetos ``Subscriber`` retornados são instâncias transitórias do
-modelo — os consumidores (dispatcher de alertas) só leem ``phone``/``id``.
+fake). Os objetos ``Subscriber`` retornados são instâncias transitórias da
+dataclass de domínio (``app.domain``) — os consumidores (dispatcher de alertas)
+só leem ``phone``/``id``.
 """
 
 import time
 
 from app.core import worker_runtime
-from app.models import Subscriber
+from app.domain import Subscriber
 from app.services import subscription_messages as messages
 
 # Janela de dedupe dos eventos da Evolution (o isolate não guarda estado

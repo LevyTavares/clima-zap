@@ -2,12 +2,14 @@
 
 Dois backends, mesma API: SQLAlchemy (Docker) ou D1 (Workers) —
 o interruptor é ``worker_runtime.on_workers()``.
+
+O SQLAlchemy é importado tarde (``app.db.orm``) porque o bundle do Worker não
+o empacota.
 """
 
 import app.db.session as db_session
 from app.core import worker_runtime
 from app.db import d1
-from app.models import AlertLog
 
 
 async def record_alert_dispatch(
@@ -21,6 +23,8 @@ async def record_alert_dispatch(
             alert_type, recipient, delivery_status, subscriber_id
         )
         return
+    from app.db.orm import AlertLog  # pylint: disable=import-outside-toplevel
+
     async with db_session.SessionLocal() as session:
         session.add(
             AlertLog(

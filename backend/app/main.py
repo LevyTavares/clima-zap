@@ -1,12 +1,10 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Request
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from evolution_api import EvolutionError
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.api import fetch_cariri_weather
 from app.api.forecast import router as forecast_router
@@ -22,6 +20,7 @@ from app.core.schedule import (
     FORECAST_PERIOD_JOBS,
 )
 from app.db import d1
+from app.db.errors import storage_errors
 from app.db.session import get_db
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import record_alert_dispatch
@@ -30,20 +29,30 @@ from app.services.forecast import Period, build_period_forecast
 from app.services.persistence import group_active_subscribers_by_city, resolve_group_location
 from app.services.weather_dispatch import dispatch_weather_alerts
 
+if TYPE_CHECKING:  # anotação apenas: apscheduler não entra no bundle do Worker
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 # Prefer DOCS_DIR (.env / Docker mount at /docs); fallback to repo docs/ (dev).
 DOCS_DIR = Path(settings.docs_dir) if settings.docs_dir else ROOT_DIR / "docs"
 
 logger = logging.getLogger(__name__)
 # Horas, jitter dos jobs e expressões de cron vivem em `app.core.schedule` —
 # fonte única compartilhada com os Cron Triggers do Workers (backend/worker.py).
-scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
+#
+# `scheduler` só existe no caminho Docker: no Workers os agendamentos são Cron
+# Triggers e o bundle não empacota APScheduler/tzdata (ver backend/pyproject.toml).
+scheduler: "AsyncIOScheduler | None" = None
+if not worker_runtime.is_workers_runtime():
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
 
 
 async def process_scheduled_weather_alerts() -> None:
     """Gera e envia alertas por região: sempre a padrão + cada cidade de assinantes."""
     try:
         groups = await group_active_subscribers_by_city()
-    except SQLAlchemyError as error:
+    except storage_errors() as error:
         logger.error("Erro ao buscar assinantes ativos: %s", error)
         groups = {}
 
@@ -82,25 +91,28 @@ async def send_period_forecast(period: Period) -> None:
         log.error("Erro ao enviar forecast %s para %s: %s", period, group_jid, e)
         try:
             await record_alert_dispatch(f"forecast_{period}", group_jid, "failed")
-        except SQLAlchemyError as log_error:
+        except storage_errors() as log_error:
             log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
         return
 
     delivery_status = result.get("status", "sent") if isinstance(result, dict) else "sent"
     try:
         await record_alert_dispatch(f"forecast_{period}", group_jid, str(delivery_status))
-    except SQLAlchemyError as log_error:
+    except storage_errors() as log_error:
         log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
 
 
 def register_forecast_jobs() -> None:
     """Registra os 3 jobs de boletim — só se grupo configurado."""
     log = logging.getLogger("uvicorn.error")
+    active_scheduler = scheduler
+    if active_scheduler is None:  # Workers: agendamentos vêm dos Cron Triggers
+        return
     if not settings.forecast_group_jid:
         log.warning("FORECAST_GROUP_JID vazio — jobs de forecast periódico não registrados")
         return
     for job_id, hour, period in FORECAST_PERIOD_JOBS:
-        scheduler.add_job(
+        active_scheduler.add_job(
             send_period_forecast,
             trigger="cron",
             hour=hour,
@@ -118,7 +130,8 @@ def register_forecast_jobs() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if worker_runtime.is_workers_runtime():
+    active_scheduler = scheduler
+    if worker_runtime.is_workers_runtime() or active_scheduler is None:
         # No Workers os agendamentos vêm dos Cron Triggers (backend/worker.py)
         # e o ASGI serveria o lifespan a cada request — não iniciamos o
         # APScheduler aqui.
@@ -126,7 +139,7 @@ async def lifespan(_: FastAPI):
         return
     for warning in settings.production_warnings():
         logger.warning("Config insegura em produção: %s", warning)
-    scheduler.add_job(
+    active_scheduler.add_job(
         process_scheduled_weather_alerts,
         trigger="cron",
         hour=",".join(map(str, ALERT_SCHEDULE_HOURS)),
@@ -135,11 +148,11 @@ async def lifespan(_: FastAPI):
         replace_existing=True,
     )
     register_forecast_jobs()
-    scheduler.start()
+    active_scheduler.start()
     try:
         yield
     finally:
-        scheduler.shutdown()
+        active_scheduler.shutdown()
 
 
 # --- 1. METADADOS DO SWAGGER UI ---
@@ -230,6 +243,8 @@ async def health_check(db=Depends(get_db)):
         if worker_runtime.on_workers():
             await d1.ping()
         else:
+            from app.db.orm import text  # pylint: disable=import-outside-toplevel
+
             await db.execute(text("SELECT 1"))
         health_status["services"]["database"] = "healthy"
     except Exception as e:  # pylint: disable=broad-exception-caught

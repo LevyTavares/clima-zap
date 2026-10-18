@@ -4,19 +4,18 @@ version = "1.0.0"
 description = "API de monitoramento e alertas climáticos do Cariri (Cloudflare Workers)"
 readme = "../README.md"
 requires-python = ">=3.12"
-# Dependências do bundle do Worker (Python Workers/Pyodide). O restante do
-# toolchain (uvicorn, alembic, aiosqlite, asyncpg, pytest, pylint) é exclusivo
-# do caminho Docker e fica no requirements.txt da raiz.
+# Dependências do bundle do Worker (Python Workers/Pyodide). Só entra aqui o que
+# o caminho Pyodide importa: nada de SQLAlchemy/APScheduler (que arrasta
+# apscheduler+tzdata+tzlocal) — eles vivem exclusivamente no caminho Docker
+# (requirements.txt da raiz) e são importados tarde via `app.db.orm`. O teste
+# `tests/test_worker_bundle.py` falha se algum voltar ao grafo do Worker.
 dependencies = [
     "fastapi",
     "pydantic",
     "pydantic-settings",
     "python-dotenv",
     "httpx",
-    "sqlalchemy",
-    "apscheduler",
     "evolution-whatsapp",
-    "tzdata",
 ]
 
 [dependency-groups]

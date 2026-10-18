@@ -1,12 +1,17 @@
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from evolution_api import EvolutionError
-from sqlalchemy.exc import SQLAlchemyError
 
-from app.models import Subscriber
+from app.db.errors import storage_errors
 from app.services.alert_history import record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.services.persistence import list_active_subscribers
+
+if TYPE_CHECKING:  # anotação apenas: o ORM não entra no bundle do Worker
+    from app.domain import Subscriber
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -26,7 +31,7 @@ async def dispatch_weather_alerts(
     if subscribers is None:
         try:
             subscribers = await list_active_subscribers()
-        except SQLAlchemyError as error:
+        except storage_errors() as error:
             logger.error("Erro ao buscar assinantes ativos para alerta: %s", error)
             return
 
@@ -52,7 +57,7 @@ async def dispatch_weather_alerts(
                     status,
                     subscriber.id,
                 )
-            except SQLAlchemyError as error:
+            except storage_errors() as error:
                 logger.error(
                     "Erro ao registrar alerta climático para %s: %s",
                     subscriber.phone,

@@ -12,16 +12,19 @@ Dois backends, mesma API:
   env do Worker foi anexado (`worker_runtime.on_workers()`).
 """
 
-import time
+from __future__ import annotations
 
-from sqlalchemy import select
+import time
+from typing import TYPE_CHECKING
 
 import app.db.session as db_session
 from app.core import worker_runtime
 from app.core.location import LocationData, match_city
 from app.db import d1
-from app.models import Subscriber
 from app.services import subscription_messages as messages
+
+if TYPE_CHECKING:  # anotação apenas: o ORM não entra no bundle do Worker
+    from app.domain import Subscriber
 
 # dedupe: evolution fires per-instance + global webhook → same event twice
 _seen_message_ids: dict[str, float] = {}
@@ -32,9 +35,21 @@ SEEN_TTL_SECONDS = 300.0
 _dm_hints: set[str] = set()
 
 
+def _orm():
+    """Porta do SQLAlchemy (``app.db.orm``) — import tardio, só no Docker.
+
+    No Workers o SQLAlchemy não está no bundle: qualquer acesso ao ORM acontece
+    apenas nos ramos em que ``worker_runtime.on_workers()`` é False.
+    """
+    from app.db import orm  # pylint: disable=import-outside-toplevel
+
+    return orm
+
+
 async def _find_subscriber(session, phone: str) -> Subscriber | None:
+    orm = _orm()
     result = await session.execute(
-        select(Subscriber).where(Subscriber.phone == phone)
+        orm.select(orm.Subscriber).where(orm.Subscriber.phone == phone)
     )
     return result.scalar_one_or_none()
 
@@ -80,7 +95,11 @@ async def subscribe_recipient(phone: str, name: str | None = None) -> dict:
             if name is not None:
                 subscriber.name = name.strip() or None
         else:
-            session.add(Subscriber(phone=phone, name=name.strip() if name else None))
+            session.add(
+                _orm().Subscriber(
+                    phone=phone, name=name.strip() if name else None
+                )
+            )
         await session.commit()
         return messages.subscribed(phone)
 
@@ -111,7 +130,7 @@ async def set_subscriber_location(
         subscriber = await _find_subscriber(session, phone)
 
         if subscriber is None:
-            subscriber = Subscriber(phone=phone, is_active=False)
+            subscriber = _orm().Subscriber(phone=phone, is_active=False)
             session.add(subscriber)
         subscriber.city = name
         subscriber.latitude = latitude
@@ -149,8 +168,9 @@ async def list_active_subscribers() -> list[Subscriber]:
     if worker_runtime.on_workers():
         return await d1.list_active_subscribers()
     async with db_session.SessionLocal() as session:
+        orm = _orm()
         result = await session.execute(
-            select(Subscriber).where(Subscriber.is_active.is_(True))
+            orm.select(orm.Subscriber).where(orm.Subscriber.is_active.is_(True))
         )
         return list(result.scalars())
 
