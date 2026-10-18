@@ -9,6 +9,8 @@ vars e secrets) que precisamos expor para o restante da aplicação:
 - ``on_workers()``: True após ``attach`` — é o interruptor usado por
   persistence/alert_history para escolher D1 em vez de SQLAlchemy.
 - ``d1()``: binding do banco D1 (``env.DB``) ou None.
+- ``defer(work)``: agenda trabalho de fundo no ``ctx.waitUntil`` do Workers
+  (no Docker devolve False e o chamador usa ``BackgroundTasks``).
 - ``brt_hour(ms)``: hora de Fortaleza (UTC-3 fixo, sem DST desde 2019) a
   partir do ``scheduledTime`` (epoch ms) de um Cron Trigger.
 
@@ -16,9 +18,11 @@ No caminho Docker (CPython) nada disso é ativado: o APScheduler e o
 SQLAlchemy continuam responsáveis pelos agendamentos e pela persistência.
 """
 
+import asyncio
 import logging
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from pydantic import SecretStr
@@ -110,6 +114,40 @@ def assets() -> object | None:
     """Binding de Assets (``env.ASSETS``) ou None se não houver."""
     env = _STATE.get("env")
     return getattr(env, "ASSETS", None) if env is not None else None
+
+
+def defer(work: Callable[[], Awaitable[object]]) -> bool:
+    """Agenda trabalho pós-resposta no Workers (``ctx.waitUntil``).
+
+    O adaptador ASGI do SDK só devolve a resposta depois de concluir os
+    ``BackgroundTasks`` do FastAPI (ele aguarda a task do request quando a
+    resposta é bufferizada). Atrasar o 200 do webhook até o fim do
+    processamento é frágil — a Evolution pode dar timeout e reenviar o evento.
+
+    Aqui o handler devolve a resposta na hora e o processamento segue no event
+    loop, protegido pelo ``waitUntil`` do runtime (mesmo mecanismo que o SDK
+    usa para fechar o request). Erros são logados: não há resposta para falhar.
+
+    No caminho Docker (CPython) retorna False sem criar nada — quem chama cai
+    no ``BackgroundTasks`` de sempre.
+    """
+    if not is_workers_runtime():
+        return False
+    from workers import wait_until  # pylint: disable=import-outside-toplevel,no-name-in-module
+
+    task = asyncio.ensure_future(work())
+    task.add_done_callback(_log_background_error)
+    wait_until(task)
+    return True
+
+
+def _log_background_error(task: asyncio.Task) -> None:
+    """Erro em trabalho de fundo não pode sumir silenciosamente."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error("Erro em trabalho de fundo do webhook: %s", error)
 
 
 def brt_hour(scheduled_time_ms: int) -> int:

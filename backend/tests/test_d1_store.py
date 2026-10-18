@@ -6,6 +6,9 @@ CPython; cobrimos a conversão com um stub que expõe ``to_py``/atributos.
 """
 
 import asyncio
+import logging
+import sys
+import types
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -339,6 +342,57 @@ def test_dedupe_first_seen_then_duplicate(workers_env):  # pylint: disable=unuse
 
 def test_d1_ping(workers_env):  # pylint: disable=unused-argument
     asyncio.run(d1.ping())  # não deve levantar exceção
+
+
+# ---------------------------------------------------------------------------
+# Trabalho de fundo (ctx.waitUntil) — o webhook responde sem esperar o envio
+# ---------------------------------------------------------------------------
+
+
+def test_defer_no_cpython_devolve_false():
+    """No Docker o chamador cai no BackgroundTasks do FastAPI."""
+    assert worker_runtime.defer(lambda: asyncio.sleep(0)) is False
+
+
+def _fake_workers_sdk(monkeypatch, registered):
+    sdk = types.ModuleType("workers")
+    sdk.wait_until = registered.append
+    monkeypatch.setitem(sys.modules, "workers", sdk)
+    monkeypatch.setattr(worker_runtime, "is_workers_runtime", lambda: True)
+
+
+def test_defer_no_workers_registra_wait_until(monkeypatch):
+    registered: list = []
+    _fake_workers_sdk(monkeypatch, registered)
+
+    async def work():
+        return "ok"
+
+    async def flow():
+        assert worker_runtime.defer(work) is True
+        await registered[0]
+
+    asyncio.run(flow())
+
+    assert registered[0].result() == "ok"
+
+
+def test_defer_loga_erro_do_trabalho_de_fundo(monkeypatch, caplog):
+    registered: list = []
+    _fake_workers_sdk(monkeypatch, registered)
+
+    async def boom():
+        raise RuntimeError("falhou depois do 200")
+
+    async def flow():
+        worker_runtime.defer(boom)
+        await asyncio.wait([registered[0]])
+        await asyncio.sleep(0)  # deixa o done_callback rodar
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(flow())
+
+    assert "trabalho de fundo" in caplog.text
 
 
 def test_health_check_uses_d1_when_attached(  # pylint: disable=unused-argument

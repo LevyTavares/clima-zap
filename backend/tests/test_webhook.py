@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.api import webhook
 from app.api.webhook import handle_non_command, recipient_key, route_command
 from app.core.config import settings
 from app.main import app
@@ -281,6 +282,49 @@ def test_webhook_non_command_in_group_gets_no_reply(monkeypatch):
 
     assert response.status_code == 200
     assert not sent
+
+
+def test_webhook_delega_processamento_para_o_wait_until(monkeypatch):
+    """No Workers a resposta sai na hora e o processamento vai ao ctx.waitUntil."""
+    delegated = []
+
+    def fake_defer(work):
+        delegated.append(work)
+        return True
+
+    monkeypatch.setattr(webhook.worker_runtime, "defer", fake_defer)
+
+    payload = {
+        "event": "MESSAGES_UPSERT",
+        "instance": "clima-zap",
+        "data": {
+            "key": {
+                "remoteJid": "5588333333333@s.whatsapp.net",
+                "fromMe": False,
+                "id": "TEST-DEFER-1",
+            },
+            "message": {"conversation": "/ajuda"},
+        },
+    }
+    sent = {}
+
+    async def fake_send(number, message):
+        sent["number"] = number
+        sent["message"] = message
+        return {"status": "sent"}
+
+    monkeypatch.setattr(webhook, "send_whatsapp_message", fake_send)
+
+    response = client.post("/api/v1/webhook", json=payload)
+
+    assert response.status_code == 200
+    assert len(delegated) == 1
+    assert not sent  # nada é enviado durante o request
+
+    asyncio.run(delegated[0]())  # o trabalho continua fora do request
+
+    assert sent["number"] == "5588333333333"
+    assert "*/ajuda*" in sent["message"]
 
 
 def test_webhook_non_command_dm_gets_hint_only_once(monkeypatch):

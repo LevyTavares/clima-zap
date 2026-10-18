@@ -1,8 +1,11 @@
 import logging
 import secrets
+from functools import partial
+
 import httpx
 from evolution_api import EvolutionError
 from fastapi import APIRouter, Header, status, BackgroundTasks, HTTPException
+from app.core import worker_runtime
 from app.core.config import settings
 from app.core.geocode import geocode_city
 from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city, parse_coordinates
@@ -310,5 +313,8 @@ async def receive_webhook(
                 detail="Invalid webhook token",
             )
     logger.info("Webhook: evento %r | instância %r", payload.event, payload.instance)
-    background_tasks.add_task(process_event_background, payload)
+    # No Workers o processamento vai para o ctx.waitUntil: a Evolution recebe o
+    # 200 na hora em vez de esperar o fetch do clima + envio da resposta.
+    if not worker_runtime.defer(partial(process_event_background, payload)):
+        background_tasks.add_task(process_event_background, payload)
     return {"status": "received", "reply": "ok"}
