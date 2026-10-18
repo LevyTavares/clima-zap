@@ -31,15 +31,22 @@
 		"directory": "../docs",
 		"binding": "ASSETS"
 	},
-	// Vars não-secretas. Segredos vão em `wrangler secret put <NOME>`:
-	//   EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME,
-	//   FORECAST_GROUP_JID, WEBHOOK_AUTH_TOKEN
-	// Número do próprio bot (menções nativas na gramática) também pode ir
-	// aqui ou como secret: "TARGET_PHONE_NUMBER": "5588999999999".
+	// Vars não-secretas.
 	"vars": {
 		"ENVIRONMENT": "production",
 		"BOT_NAME": "clima-zap"
+		// Origens do frontend para o CORS (separadas por vírgula).
+		// Vazio = nenhuma origem cross-origin; `*` é ignorado.
+		// "CORS_ORIGINS": "https://clima-zap.vercel.app"
 	},
+	// Segredos vão em `wrangler secret put <NOME>` (nunca no repositório):
+	//   EVOLUTION_API_URL   → endpoint público HTTPS da Evolution API
+	//   EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME, FORECAST_GROUP_JID
+	//   WEBHOOK_AUTH_TOKEN  → obrigatório em produção (sem ele o webhook
+	//                         responde 503); mesmo valor no header da
+	//                         instância da Evolution
+	//   TARGET_PHONE_NUMBER → número do bot, só dígitos (menções nativas);
+	//                         secret para não expor o número no repo
 	"observability": {
 		"enabled": true
 	}

@@ -24,6 +24,10 @@ docker run -d \
   atendai/evolution-api
 ```
 
+> O Compose da raiz já sobe essa stack (`docker compose up -d postgres redis
+> evolution-api`). Em produção, a Evolution precisa de um host always-on com
+> **HTTPS público** (o Worker não alcança `localhost`) — veja o README.
+
 ### 2. Create Instance
 
 ```bash
@@ -56,8 +60,10 @@ curl -X POST "http://localhost:8080/webhook/set/clima-zap" \
 ```
 
 > No Cloudflare Workers a URL é `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
-> (se `WEBHOOK_AUTH_TOKEN` estiver setado no Worker, adicione também
+> (o `WEBHOOK_AUTH_TOKEN` é obrigatório em produção; adicione também
 > `"headers": {"Authorization": "Bearer <token>"}` ao payload do webhook).
+> A Evolution continua hospedada fora do Worker (veja *Onde hospedar a
+> Evolution API?* no README) e precisa alcançar essa URL por HTTPS.
 
 ### 4. Environment Variables
 
@@ -116,9 +122,9 @@ Commands are recognized in **two invocation forms** only:
 
 Plain text without `/` or a mention is **not** a command (`ajuda` alone is ignored).
 
-### Webhook authentication (optional)
+### Webhook authentication (required in production)
 
-If `WEBHOOK_AUTH_TOKEN` is set, `POST /api/v1/webhook` requires the header `Authorization: Bearer <token>` (HTTP 401 otherwise). Configure the same value as a **custom header** on the Evolution API instance webhook (`webhook.headers`). When empty, the endpoint stays open (development default).
+If `WEBHOOK_AUTH_TOKEN` is set, `POST /api/v1/webhook` requires the header `Authorization: Bearer <token>` (HTTP 401 otherwise). Configure the same value as a **custom header** on the Evolution API instance webhook (`webhook.headers`). When empty the endpoint stays open, but only in development: with `ENVIRONMENT=production` it responds **503** until the token is configured (fail closed).
 
 ## Periodic Group Forecast
 
@@ -164,10 +170,12 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 
 ## Security
 
-- Verify webhook signatures in production
-- Use HTTPS for webhook URLs
-- Store API keys in environment variables
+- Set `WEBHOOK_AUTH_TOKEN` in production (the endpoint fails closed with 503 without it) and send it as a custom `Authorization: Bearer <token>` header on the Evolution webhook
+- Use HTTPS for the webhook URL and for `EVOLUTION_API_URL` — the API key travels to Evolution on every send
+- Restrict CORS to the frontend origin via `CORS_ORIGINS` (wildcard is ignored)
+- Store API keys in environment variables and rotate `EVOLUTION_API_KEY` / `POSTGRES_PASSWORD` off the template placeholders
 - Never commit `.env` files
+- Evolution API cannot run on Cloudflare Workers (persistent WhatsApp socket, PostgreSQL/Redis, instance storage). Host it on an always-on Docker host reachable over public HTTPS — see the README section *Onde hospedar a Evolution API?*
 
 ## Troubleshooting
 

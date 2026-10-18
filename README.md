@@ -119,6 +119,7 @@ clima-zap/
 │   │   │   └── webhook.py        # Webhook WhatsApp + roteador de comandos
 │   │   ├── core/
 │   │   │   ├── config.py         # Settings (pydantic-settings)
+│   │   │   ├── cors.py           # CORS por allowlist (lido por request)
 │   │   │   ├── schedule.py       # Horas, jitter e crons (Docker + Workers)
 │   │   │   └── worker_runtime.py # Bridge do runtime Workers (D1, brt_hour)
 │   │   ├── schemas/
@@ -342,17 +343,20 @@ npx wrangler d1 create clima-zap
 npx wrangler d1 migrations apply clima-zap --remote
 
 # 4. Segredos (nomes em CAIXA ALTA; o código aceita também os nomes do .env)
-npx wrangler secret put EVOLUTION_API_URL
+npx wrangler secret put EVOLUTION_API_URL      # URL pública HTTPS da Evolution
 npx wrangler secret put EVOLUTION_API_KEY
 npx wrangler secret put EVOLUTION_INSTANCE_NAME
 npx wrangler secret put FORECAST_GROUP_JID   # opcional: boletins 06/14/20h
-npx wrangler secret put WEBHOOK_AUTH_TOKEN   # opcional: bearer no webhook
+npx wrangler secret put WEBHOOK_AUTH_TOKEN   # obrigatório em produção (503 sem ele)
 npx wrangler secret put TARGET_PHONE_NUMBER  # opcional: menção nativa @número
 
 # 5. Deploy
 uvx --from workers-py pywrangler deploy
 ```
 
+- **CORS:** liste as origens do frontend em `vars.CORS_ORIGINS` do
+  `wrangler.jsonc` (ex.: `"CORS_ORIGINS": "https://clima-zap.vercel.app"`).
+  Vazio = nenhuma origem cross-origin; `*` é ignorado de propósito
 - **Webhook da Evolution:** `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
 - **Cron Triggers:** alertas `0 9,11,15,17,19,21 * * *` (06/08/12/14/16/18h BRT) e
   boletins `0 9,17,23 * * *` (06/14/20h BRT) — America/Fortaleza = UTC-3 fixo.
@@ -363,6 +367,36 @@ uvx --from workers-py pywrangler deploy
   do Worker (diretório `docs/` no `wrangler.jsonc`)
 - **Dev local:** `uvx --from workers-py pywrangler dev` (workerd + D1 local;
   aplique antes `npx wrangler d1 migrations apply clima-zap --local`)
+
+### Onde hospedar a Evolution API?
+
+A Evolution API **não roda no Cloudflare Workers**: é Node.js/Baileys e mantém
+um socket permanente com o WhatsApp, além de exigir PostgreSQL, Redis e disco
+para as instâncias — nada disso existe no runtime do Worker (isolate efêmero,
+sem socket persistente nem filesystem).
+
+Ou seja: o Worker é só o *backend* do Clima-Zap. A Evolution fica **externa** ao
+Worker e a comunicação é bidirecional por HTTPS:
+
+| Sentido | Quem chama | Requisito |
+|---------|------------|-----------|
+| Worker → Evolution | envio de mensagens (API key no header) | URL **pública HTTPS** em `EVOLUTION_API_URL` |
+| Evolution → Worker | webhook `/api/v1/webhook` (Bearer) | Evolution com saída para a internet + URL HTTPS do Worker |
+
+Opções para produção:
+
+- **VPS/servidor always-on** rodando o `docker compose` da Evolution, exposto por
+  **Cloudflare Tunnel** (recomendado: HTTPS sem abrir portas, no mesmo
+  ecossistema do Worker). Suba só os serviços da Evolution (`postgres`, `redis`,
+  `evolution-api`).
+- **PaaS com volume persistente** (Fly.io, Railway, Render…) + PostgreSQL/Redis
+  gerenciados.
+- **Cloudflare Containers** para concentrar no mesmo provedor — ainda exige
+  storage persistente para a sessão Baileys e Postgres/Redis.
+
+Em qualquer caso: `EVOLUTION_API_URL` nunca é `localhost` (o Worker não alcança a
+sua máquina) e o `SERVER_URL` da própria Evolution deve ser a URL HTTPS pública
+dela — o pareamento/QR depende disso.
 
 ---
 
@@ -456,17 +490,18 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | `DEFAULT_LATITUDE` | `-7.229711` | Latitude do bairro Triângulo |
 | `DEFAULT_LONGITUDE` | `-39.3300014` | Longitude do bairro Triângulo |
 | `OPEN_METEO_URL` | `https://api.open-meteo.com/v1/forecast` | URL do Open-Meteo |
-| `EVOLUTION_API_URL` | `http://localhost:8080` (local) / `http://evolution-api:8080` (Docker, override no compose) | URL da Evolution API |
-| `EVOLUTION_API_KEY` | `changeme` | Chave de autenticação da Evolution API |
+| `EVOLUTION_API_URL` | `http://localhost:8080` (local) / `http://evolution-api:8080` (Docker, override no compose) | URL da Evolution API. No Workers precisa ser um endpoint **público HTTPS** |
+| `EVOLUTION_API_KEY` | `troque-esta-chave` | Chave de autenticação da Evolution API — **troque** antes de usar |
 | `EVOLUTION_INSTANCE_NAME` | `clima-zap` | Nome da instância WhatsApp |
 | `TARGET_PHONE_NUMBER` | *(vazio)* | Número do próprio bot (só dígitos) — ativa a menção nativa `@número` como invocação de comando |
 | `BOT_NAME` | `clima-zap` | Nome do bot na invocação textual: `@clima-zap previsao` |
 | `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Vazio = jobs desativados |
-| `WEBHOOK_AUTH_TOKEN` | *(vazio)* | Se definido, o webhook exige `Authorization: Bearer <token>` (configure como header custom no webhook da Evolution). Vazio = sem verificação |
+| `WEBHOOK_AUTH_TOKEN` | *(vazio)* | Token do header `Authorization: Bearer <token>` (configure também no webhook da Evolution). **Obrigatório em produção**: sem ele o webhook responde 503 em vez de aceitar eventos forjados |
+| `CORS_ORIGINS` | *(vazio)* | Origens liberadas no CORS, separadas por vírgula (ex.: `https://clima-zap.vercel.app`). Vazio = nenhuma origem cross-origin; `*` é ignorado |
 | `DOCS_DIR` | *(vazio → `docs/` da raiz)* / `/docs` (Docker) | Diretório da documentação markdown |
 | `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
 | `POSTGRES_USERNAME` | `evolution` | Usuário do PostgreSQL |
-| `POSTGRES_PASSWORD` | `evolution_pass` | Senha do PostgreSQL |
+| `POSTGRES_PASSWORD` | `troque-esta-senha` | Senha do PostgreSQL — **troque** antes de usar |
 | `PYTHONPATH` | `.` | Necessário para rodar pytest de `backend/` (não vai no `.env`) |
 
 ### Frontend
@@ -529,9 +564,10 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_webhook.py` | 19 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta e autenticação `Bearer` |
+| `tests/test_webhook.py` | 20 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
 | `tests/test_d1_store.py` | 16 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
 | `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
+| `tests/test_config.py` | 6 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros |
 | `tests/test_schedule.py` | 7 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
@@ -604,10 +640,21 @@ Para ativar o CD: crie um [API Token](https://dash.cloudflare.com/profile/api-to
 
 ## 🔐 Segurança
 
-- Alterar `EVOLUTION_API_KEY` e `POSTGRES_PASSWORD` antes de produção
-- Em produção: usar HTTPS no webhook e implementar verificação de assinatura
-- Nunca commitar arquivos `.env`
-- CORS está com `allow_origins=["*"]` — restringir em produção
+- **CORS por allowlist** (`CORS_ORIGINS`, lido a cada request): sem `*` e sem
+  credenciais. Vazio = nenhuma origem cross-origin. O curinga é ignorado de
+  propósito (`app/core/cors.py`)
+- **Webhook fail closed:** em produção `WEBHOOK_AUTH_TOKEN` é obrigatório — sem
+  ele `POST /api/v1/webhook` responde **503** em vez de aceitar eventos
+  forjados. A comparação do Bearer é em tempo constante (`secrets.compare_digest`)
+- **Defaults inseguros:** trocar `EVOLUTION_API_KEY` (`openssl rand -hex 32`) e
+  `POSTGRES_PASSWORD` antes de produção. Com `ENVIRONMENT=production` a app
+  avisa no startup (`settings.production_warnings`) se ainda estiverem no
+  placeholder ou se `EVOLUTION_API_URL` não for HTTPS
+- **Evolution API exposta por HTTPS público:** a API key trafega até ela em cada
+  envio, e ela precisa alcançar o webhook HTTPS do Worker (veja *Onde hospedar a
+  Evolution API*)
+- Nunca commitar arquivos `.env` (o `.gitignore` cobre `.env`, `.dev.vars` e
+  artefatos do Workers)
 - Volumes persistem dados: sobrevivem a `docker compose down`, **não** a `down -v`
 
 ---
