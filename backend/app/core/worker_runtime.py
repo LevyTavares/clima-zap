@@ -19,6 +19,7 @@ SQLAlchemy continuam responsáveis pelos agendamentos e pela persistência.
 """
 
 import asyncio
+import importlib
 import logging
 import os
 import sys
@@ -133,7 +134,11 @@ def defer(work: Callable[[], Awaitable[object]]) -> bool:
     """
     if not is_workers_runtime():
         return False
-    from workers import wait_until  # pylint: disable=import-outside-toplevel,no-name-in-module
+
+    try:
+        wait_until = importlib.import_module("workers").wait_until
+    except (AttributeError, ModuleNotFoundError):
+        return False
 
     task = asyncio.ensure_future(work())
     task.add_done_callback(_log_background_error)
