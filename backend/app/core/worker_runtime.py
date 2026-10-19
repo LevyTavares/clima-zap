@@ -135,6 +135,9 @@ def defer(work: Callable[[], Awaitable[object]]) -> bool:
     if not is_workers_runtime():
         return False
 
+    # Import dinâmico de propósito: o pacote `workers` só existe no runtime do
+    # Worker (workerd) e o pylint roda em CPython sem ele — um
+    # `from workers import wait_until` falha no lint com E0401 (import-error).
     try:
         wait_until = importlib.import_module("workers").wait_until
     except (AttributeError, ModuleNotFoundError):
