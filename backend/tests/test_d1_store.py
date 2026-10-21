@@ -212,6 +212,23 @@ def test_attach_noop_without_env():
     assert worker_runtime.d1() is None
 
 
+def test_scheduled_env_prefere_argumento_e_cai_no_self_env(workers_env):
+    """O runtime antigo chama `scheduled` com env=None (só `self.env` tem o D1)."""
+    other = SimpleNamespace(DB=object())
+    assert worker_runtime.scheduled_env(SimpleNamespace(env=workers_env), other) is other
+    assert worker_runtime.scheduled_env(SimpleNamespace(env=workers_env), None) is workers_env
+    assert worker_runtime.scheduled_env(SimpleNamespace(), None) is None
+
+
+def test_storage_errors_no_workers_nunca_importa_sqlalchemy(monkeypatch):
+    """Sem env anexado, o erro não pode virar `No module named 'sqlalchemy'`."""
+    from app.db.errors import storage_errors  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(worker_runtime, "is_workers_runtime", lambda: True)
+    worker_runtime.reset_for_tests()
+    assert storage_errors() == (RuntimeError,)
+
+
 @pytest.mark.parametrize(
     ("iso_utc", "expected_hour"),
     [

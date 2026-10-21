@@ -100,6 +100,20 @@ def attach(env: object) -> None:
         logger.warning("Config insegura em produção: %s", warning)
 
 
+def scheduled_env(entrypoint: object, env: object) -> object:
+    """Env do Worker no handler ``scheduled``: o argumento ou ``self.env``.
+
+    O runtime fixado pela ``compatibility_date`` do deploy chama
+    ``scheduled(self, controller, env, ctx)`` com ``env=None`` — o
+    ``wrangler dev --latest`` mascara isso, mas em produção o D1 nunca era
+    ativado e o job caía no ramo SQLAlchemy. O ``WorkerEntrypoint`` recebe o
+    env no construtor e o expõe em ``self.env``.
+    """
+    if env is not None:
+        return env
+    return getattr(entrypoint, "env", None)
+
+
 def on_workers() -> bool:
     """True quando o env do Worker já foi anexado (caminho D1 ativo)."""
     return _STATE.get("env") is not None

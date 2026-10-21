@@ -57,7 +57,12 @@ class Default(_AsgiEntrypoint):
 
     async def scheduled(self, controller, env, ctx):  # pylint: disable=unused-argument
         """Cron Trigger: dispara os jobs devidos pela expressão e hora BRT."""
-        worker_runtime.attach(env)
+        # O runtime do Cron Trigger nem sempre entrega o `env` no argumento:
+        # na versão fixada pela compatibility_date do deploy ele chega None
+        # (o `--latest` do `wrangler dev` mascara isso). O `WorkerEntrypoint`
+        # guarda o env real em `self.env`; sem ele o `attach` não ativa o
+        # caminho D1 e o job cai no ramo SQLAlchemy, que não existe no bundle.
+        worker_runtime.attach(worker_runtime.scheduled_env(self, env))
         cron = (controller.cron or "").strip()
         hour = worker_runtime.brt_hour(controller.scheduledTime)
         logger.warning("Cron Trigger %s → %02dh BRT", cron, hour)
@@ -79,16 +84,18 @@ class Default(_AsgiEntrypoint):
         try:
             removed = await prune_alert_logs()
             logger.warning("Purge do histórico: %s linha(s) removida(s)", removed)
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Erro no purge do histórico: %s", error)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Erro no purge do histórico")
 
     @staticmethod
     async def _send_alerts(hour: int) -> None:
         """Alertas agendados — sem jitter, igual ao caminho Docker."""
         try:
             await process_scheduled_weather_alerts()
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Erro no job de alertas (%02dh BRT): %s", hour, error)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # `exception` preserva o stack trace: sem ele, um erro de import
+            # vira só a mensagem e esconde a causa real.
+            logger.exception("Erro no job de alertas (%02dh BRT)", hour)
 
     @staticmethod
     async def _send_bulletin(period: Period) -> None:
@@ -101,5 +108,5 @@ class Default(_AsgiEntrypoint):
             await asyncio.sleep(delay)
         try:
             await send_period_forecast(period)
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Erro no boletim %s: %s", period, error)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Erro no boletim %s", period)

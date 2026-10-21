@@ -11,11 +11,12 @@ from app.core import worker_runtime
 def storage_errors() -> tuple[type[Exception], ...]:
     """Tipos de erro do storage atual (avaliados no ``except``, não no import).
 
-    - Workers (binding D1 anexado): ``RuntimeError`` levantado por
-      ``app.db.d1`` quando o binding não está disponível.
+    - Workers (Pyodide): ``RuntimeError`` — inclusive se o env ainda não foi
+      anexado, porque o SQLAlchemy nunca existe no bundle do Worker (evita
+      mascarar a falha real com ``No module named 'sqlalchemy'``).
     - Docker/CPython: ``SQLAlchemyError`` (import tardio).
     """
-    if worker_runtime.on_workers():
+    if worker_runtime.is_workers_runtime() or worker_runtime.on_workers():
         return (RuntimeError,)
     from sqlalchemy.exc import SQLAlchemyError  # pylint: disable=import-outside-toplevel
 
