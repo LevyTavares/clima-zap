@@ -58,7 +58,7 @@ def _normalize_string(text: str) -> str:
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 
-def get_location_coords(city_query: str | None) -> LocationData:
+def get_location_coords(city_query: str | None) -> LocationData | None:
     if not city_query:
         return DEFAULT_LOCATION
 
@@ -74,16 +74,16 @@ def get_location_coords(city_query: str | None) -> LocationData:
         if key_norm in query_norm or query_norm in key_norm:
             return CRAJUBAR_LOCATIONS[key]
 
-    return DEFAULT_LOCATION
+    return None
 
 
-def match_city(city_query: str | None) -> LocationData:
+def match_city(city_query: str | None) -> LocationData | None:
     """Alias de compatibilidade para o webhook."""
     return get_location_coords(city_query)
 
 
-def parse_coordinates(text: str | None) -> tuple[float, float] | None:
-    """Extrai latitude e longitude de strings no formato 'lat, lon'."""
+def parse_coordinates(text: str | None) -> LocationData | None:
+    """Extrai latitude e longitude e retorna no formato de dicionário de localização."""
     if not text:
         return None
     try:
@@ -91,7 +91,12 @@ def parse_coordinates(text: str | None) -> tuple[float, float] | None:
         if len(parts) == 2:
             lat, lon = float(parts[0]), float(parts[1])
             if -90 <= lat <= 90 and -180 <= lon <= 180:
-                return lat, lon
+                return {
+                    "name": f"{lat:.2f}, {lon:.2f}",
+                    "state": "",
+                    "latitude": lat,
+                    "longitude": lon,
+                }
     except ValueError:
         pass
     return None
