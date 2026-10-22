@@ -1,28 +1,51 @@
+# pylint: disable=duplicate-code,line-too-long,missing-module-docstring,missing-function-docstring
 import unicodedata
 from typing import Dict, TypedDict
 
 
 class LocationData(TypedDict):
     name: str
+    state: str
     latitude: float
     longitude: float
 
 
 CRAJUBAR_LOCATIONS: Dict[str, LocationData] = {
-    "barbalha": {
-        "name": "Barbalha",
-        "latitude": -7.3108,
-        "longitude": -39.3018,
-    },
     "juazeiro do norte": {
         "name": "Juazeiro do Norte",
+        "state": "CE",
         "latitude": -7.2142,
         "longitude": -39.3153,
     },
+    "barbalha": {
+        "name": "Barbalha",
+        "state": "CE",
+        "latitude": -7.3108,
+        "longitude": -39.3018,
+    },
     "crato": {
         "name": "Crato",
+        "state": "CE",
         "latitude": -7.2342,
         "longitude": -39.4086,
+    },
+    "juazeiro": {
+        "name": "Juazeiro do Norte",
+        "state": "CE",
+        "latitude": -7.2142,
+        "longitude": -39.3153,
+    },
+    "juazeiro ba": {
+        "name": "Juazeiro",
+        "state": "BA",
+        "latitude": -9.4116,
+        "longitude": -40.5033,
+    },
+    "juazeiro da bahia": {
+        "name": "Juazeiro",
+        "state": "BA",
+        "latitude": -9.4116,
+        "longitude": -40.5033,
     },
 }
 
@@ -30,58 +53,50 @@ DEFAULT_LOCATION = CRAJUBAR_LOCATIONS["barbalha"]
 
 
 def _normalize_string(text: str) -> str:
-    """Remove acentos e converte para minúsculas para busca flexível."""
     text = text.lower().strip()
     nfkd_form = unicodedata.normalize("NFKD", text)
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 
-def match_city(city_query: str | None) -> LocationData | None:
-    """
-    Retorna as coordenadas da cidade informada (Barbalha, Juazeiro ou Crato)
-    ou None se a consulta estiver vazia / não corresponder a nenhuma cidade.
-    """
+def get_location_coords(city_query: str | None) -> LocationData | None:
     if not city_query:
-        return None
+        return DEFAULT_LOCATION
 
-    normalized_query = _normalize_string(city_query)
+    query_norm = _normalize_string(city_query)
 
-    for key, data in CRAJUBAR_LOCATIONS.items():
-        normalized_key = _normalize_string(key)
-        # Verifica se a chave está na busca OU se a busca parcial está na chave
-        if normalized_key in normalized_query or normalized_query in normalized_key:
-            return data
+    if query_norm in CRAJUBAR_LOCATIONS:
+        return CRAJUBAR_LOCATIONS[query_norm]
+
+    sorted_keys = sorted(CRAJUBAR_LOCATIONS.keys(), key=len, reverse=True)
+
+    for key in sorted_keys:
+        key_norm = _normalize_string(key)
+        if key_norm in query_norm or query_norm in key_norm:
+            return CRAJUBAR_LOCATIONS[key]
 
     return None
 
 
-def get_location_coords(city_query: str | None) -> LocationData:
-    """
-    Retorna as coordenadas da cidade informada (Barbalha, Juazeiro ou Crato).
-    Caso a cidade não seja informada ou não seja encontrada, retorna Barbalha (fallback).
-    """
-    return match_city(city_query) or DEFAULT_LOCATION
+def match_city(city_query: str | None) -> LocationData | None:
+    """Alias de compatibilidade para o webhook."""
+    return get_location_coords(city_query)
 
 
-def parse_coordinates(text: str) -> LocationData | None:
-    """Interpreta coordenadas no formato ``lat,lon`` ou ``lat lon``.
-
-    Exemplos aceitos: ``-7.2342,-39.4086`` e ``-7.2342 -39.4086``.
-    Usa ponto decimal (vírgula decimal é ambígua com o separador — vira
-    rejeição). Retorna None quando o formato ou o intervalo é inválido.
-    """
-    parts = text.strip().rstrip(",;").replace(",", " ").split()
-    if len(parts) != 2:
+def parse_coordinates(text: str | None) -> LocationData | None:
+    """Extrai latitude e longitude e retorna no formato de dicionário de localização."""
+    if not text:
         return None
     try:
-        latitude = float(parts[0])
-        longitude = float(parts[1])
+        parts = [p.strip() for p in text.split(",")]
+        if len(parts) == 2:
+            lat, lon = float(parts[0]), float(parts[1])
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                return {
+                    "name": f"{lat:.2f}, {lon:.2f}",
+                    "state": "",
+                    "latitude": lat,
+                    "longitude": lon,
+                }
     except ValueError:
-        return None
-    if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
-        return None
-    return {
-        "name": f"{latitude:g}, {longitude:g}",
-        "latitude": latitude,
-        "longitude": longitude,
-    }
+        pass
+    return None
