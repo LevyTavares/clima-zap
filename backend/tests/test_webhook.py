@@ -1,4 +1,4 @@
-# pylint: disable=duplicate-code,redefined-outer-name,line-too-long,missing-module-docstring,missing-function-docstring
+# pylint: disable=duplicate-code,redefined-outer-name,line-too-long,missing-module-docstring,missing-function-docstring,unused-argument,unused-import
 from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient

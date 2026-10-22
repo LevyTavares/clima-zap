@@ -1,4 +1,4 @@
-# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring
+# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,raise-missing-from
 import logging
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -49,8 +49,10 @@ def parse_intent(message_text: str) -> tuple[str, str | None]:
 async def handle_whatsapp_webhook(request: Request):
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido"
+        ) from exc
 
     if not body or body.get("event") != "messages.upsert":
         return {"status": "ignored"}
@@ -63,7 +65,9 @@ async def handle_whatsapp_webhook(request: Request):
 
     remote_jid = key.get("remoteJid")
     message_content = data.get("message", {})
-    text = message_content.get("conversation") or message_content.get("extendedTextMessage", {}).get("text", "")
+    text = message_content.get("conversation") or message_content.get(
+        "extendedTextMessage", {}
+    ).get("text", "")
 
     if not remote_jid or not text:
         return {"status": "no_action"}
