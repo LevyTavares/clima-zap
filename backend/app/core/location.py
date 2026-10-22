@@ -1,4 +1,4 @@
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,line-too-long,missing-module-docstring,missing-function-docstring
 import unicodedata
 from typing import Dict, TypedDict
 

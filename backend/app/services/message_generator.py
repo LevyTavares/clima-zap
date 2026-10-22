@@ -1,4 +1,4 @@
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,line-too-long,missing-module-docstring,missing-function-docstring
 import random
 
 GREETINGS = [
@@ -19,17 +19,27 @@ def get_dynamic_tip(temp_max: float, uv_index: float, rain_chance: int) -> str:
     tips = []
 
     if uv_index >= 8:
-        tips.append("O sol está forte! Não esqueça o protetor solar e óculos escuros. 😎")
+        tips.append(
+            "O sol está forte! Não esqueça o protetor solar e óculos escuros. 😎"
+        )
     elif uv_index >= 5:
-        tips.append("Índice UV moderado a alto. Mantenha-se hidratado ao longo do dia! 💧")
+        tips.append(
+            "Índice UV moderado a alto. Mantenha-se hidratado ao longo do dia! 💧"
+        )
 
     if rain_chance >= 60:
-        tips.append("Alta probabilidade de chuva! Leve um guarda-chuva se for sair. ☔")
+        tips.append(
+            "Alta probabilidade de chuva! Leve um guarda-chuva se for sair. ☔"
+        )
     elif rain_chance >= 30:
-        tips.append("Possibilidade de chuva isolada. Vale a pena ficar atento ao céu! 🌧️")
+        tips.append(
+            "Possibilidade de chuva isolada. Fique atento ao céu! 🌧️"
+        )
 
     if temp_max >= 34.0:
-        tips.append("Calor intenso previsto! Dê preferência a ambientes ventilados. 🪟")
+        tips.append(
+            "Calor intenso previsto! Dê preferência a ambientes ventilados. 🪟"
+        )
 
     if not tips:
         tips.append("Dia com clima estável. Aproveite a jornada! 👍")
