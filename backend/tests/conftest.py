@@ -1,12 +1,22 @@
 # backend/tests/conftest.py
 import asyncio
+import os
+import tempfile
 
-import pytest
+# Hermético: o `.env` da raiz (Docker) aponta para o Postgres e vazaria para os
+# testes. Fixa um SQLite temporário ANTES de importar settings/app.
+_TESTS_DB_DIR = tempfile.mkdtemp(prefix="clima-zap-tests-")
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TESTS_DB_DIR}/clima_zap.db"
+
+# pylint: disable=wrong-import-position
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from unittest.mock import patch
 
+# Os imports abaixo vêm depois do DATABASE_URL: `app.core.config` lê o env no
+# import, então o SQLite precisa estar definido antes.
 import app.api.api as weather_api
 import app.db.session as db_session
 from app.db.base import Base
