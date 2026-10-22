@@ -18,6 +18,9 @@ from app.core import worker_runtime
 from app.domain import Subscriber
 from app.services import subscription_messages as messages
 
+# Sufixo de um JID de grupo do WhatsApp (usado no filtro SQL dos boletins).
+GROUP_JID_SUFFIX = "@g.us"
+
 # Janela de dedupe dos eventos da Evolution (o isolate não guarda estado
 # confiável entre requests; usamos a tabela seen_messages no D1).
 SEEN_TTL_SECONDS = 1800.0
@@ -147,12 +150,26 @@ async def should_hint_dm(phone: str) -> bool:
     return _changes(result) == 1
 
 
-async def list_active_subscribers() -> list[Subscriber]:
-    """Retorna os assinantes ativos (usado pelo dispatcher de alertas)."""
-    result = await _db().prepare(
-        "SELECT * FROM subscribers WHERE is_active = 1"
-    ).all()
+async def list_active_subscribers(group_only: bool = False) -> list[Subscriber]:
+    """Assinantes ativos (``group_only`` = só destinos de grupo, ``@g.us``).
+
+    O filtro vai no SQL para o Worker não carregar os privados à toa (filtro
+    em Python só reduziria depois do fetch, e o fake D1 dos testes não expõe a
+    query para verificar).
+    """
+    query = "SELECT * FROM subscribers WHERE is_active = 1"
+    if group_only:
+        result = await _db().prepare(f"{query} AND substr(phone, -5) = ?").bind(
+            GROUP_JID_SUFFIX
+        ).all()
+    else:
+        result = await _db().prepare(query).all()
     return [_row_to_subscriber(row) for row in _rows(result)]
+
+
+async def list_active_groups() -> list[Subscriber]:
+    """Assinantes ativos cujo destino é grupo do WhatsApp."""
+    return await list_active_subscribers(group_only=True)
 
 
 async def record_alert_dispatch(

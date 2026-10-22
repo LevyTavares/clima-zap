@@ -13,7 +13,7 @@ from app.api.subscription import router as subscription_router
 from app.core import worker_runtime
 from app.core.config import ROOT_DIR, settings
 from app.core.cors import SettingsCORSMiddleware
-from app.core.location import CRAJUBAR_LOCATIONS, match_city
+from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city
 from app.core.schedule import (
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
@@ -27,7 +27,12 @@ from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
-from app.services.persistence import group_active_subscribers_by_city, resolve_group_location
+from app.services.persistence import (
+    group_active_subscribers_by_city,
+    list_active_groups,
+    resolve_group_location,
+    subscriber_location,
+)
 from app.services.weather_dispatch import dispatch_weather_alerts
 
 if TYPE_CHECKING:  # anotação apenas: apscheduler não entra no bundle do Worker
@@ -73,34 +78,86 @@ async def process_scheduled_weather_alerts() -> None:
         await dispatch_weather_alerts(alerts, subscribers=subscribers)
 
 
-async def send_period_forecast(period: Period) -> None:
-    """Busca boletim do período e envia para FORECAST_GROUP_JID."""
+async def _bulletin_targets() -> list[tuple[str, LocationData | None]]:
+    """Destinos do boletim: grupo principal + grupos inscritos (sem duplicar).
+
+    O formato ``(JID, local)`` carrega o local junto porque cada grupo recebe o
+    boletim da sua própria cidade; ``local`` None = região padrão da aplicação.
+    """
     log = logging.getLogger("uvicorn.error")
     group_jid = settings.forecast_group_jid
-    if not group_jid:
-        log.warning("FORECAST_GROUP_JID vazio — forecast %s pulado", period)
-        return
     try:
-        message = await build_period_forecast(period)
-    except (httpx.HTTPError, ValueError) as e:
-        log.error("Erro ao montar forecast %s: %s", period, e)
-        return
+        groups = await list_active_groups()
+    except storage_errors() as error:
+        log.error("Erro ao buscar grupos inscritos: %s", error)
+        groups = []
+
+    by_phone = {subscriber.phone: subscriber for subscriber in groups}
+    targets: list[tuple[str, LocationData | None]] = []
+    if group_jid:
+        targets.append((group_jid, subscriber_location(by_phone.get(group_jid))))
+    for subscriber in groups:
+        if subscriber.phone != group_jid:
+            targets.append((subscriber.phone, subscriber_location(subscriber)))
+    return targets
+
+
+async def _record_forecast_dispatch(
+    period: Period, recipient: str, status: str
+) -> None:
+    """Registra o envio no histórico (falha de storage não interrompe o job)."""
     try:
-        result = await send_whatsapp_message(group_jid, message)
-        log.warning("Forecast %s enviado para %s: %s", period, group_jid, result)
-    except EvolutionError as e:
-        log.error("Erro ao enviar forecast %s para %s: %s", period, group_jid, e)
-        try:
-            await record_alert_dispatch(f"forecast_{period}", group_jid, "failed")
-        except storage_errors() as log_error:
-            log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
+        await record_alert_dispatch(f"forecast_{period}", recipient, status)
+    except storage_errors() as log_error:
+        logging.getLogger("uvicorn.error").error(
+            "Erro ao registrar envio do forecast %s: %s", period, log_error
+        )
+
+
+async def send_period_forecast(period: Period) -> None:
+    """Envia o boletim do período ao grupo principal e aos grupos inscritos.
+
+    Grupos com o mesmo local compartilham a mesma mensagem (um fetch só);
+    grupos sem local cadastrado recebem o boletim da região padrão.
+    """
+    log = logging.getLogger("uvicorn.error")
+    targets = await _bulletin_targets()
+    if not targets:
+        log.warning(
+            "FORECAST_GROUP_JID vazio e nenhum grupo inscrito — "
+            "forecast %s pulado",
+            period,
+        )
         return
 
-    delivery_status = result.get("status", "sent") if isinstance(result, dict) else "sent"
-    try:
-        await record_alert_dispatch(f"forecast_{period}", group_jid, str(delivery_status))
-    except storage_errors() as log_error:
-        log.error("Erro ao registrar envio do forecast %s: %s", period, log_error)
+    messages: dict[tuple[float, float] | None, str] = {}
+    for recipient, location in targets:
+        key = (location["latitude"], location["longitude"]) if location else None
+        if key not in messages:
+            try:
+                messages[key] = (
+                    await build_period_forecast(period)
+                    if location is None
+                    else await build_period_forecast(period, location=location)
+                )
+            except (httpx.HTTPError, ValueError) as e:
+                log.error(
+                    "Erro ao montar forecast %s para %s: %s", period, recipient, e
+                )
+                continue
+
+        try:
+            result = await send_whatsapp_message(recipient, messages[key])
+            log.warning("Forecast %s enviado para %s: %s", period, recipient, result)
+        except EvolutionError as e:
+            log.error("Erro ao enviar forecast %s para %s: %s", period, recipient, e)
+            await _record_forecast_dispatch(period, recipient, "failed")
+            continue
+
+        delivery_status = (
+            result.get("status", "sent") if isinstance(result, dict) else "sent"
+        )
+        await _record_forecast_dispatch(period, recipient, str(delivery_status))
 
 
 def register_maintenance_job() -> None:
@@ -122,13 +179,10 @@ def register_maintenance_job() -> None:
 
 
 def register_forecast_jobs() -> None:
-    """Registra os 3 jobs de boletim — só se grupo configurado."""
+    """Registra os 3 jobs de boletim (grupo principal + grupos inscritos)."""
     log = logging.getLogger("uvicorn.error")
     active_scheduler = scheduler
     if active_scheduler is None:  # Workers: agendamentos vêm dos Cron Triggers
-        return
-    if not settings.forecast_group_jid:
-        log.warning("FORECAST_GROUP_JID vazio — jobs de forecast periódico não registrados")
         return
     for job_id, hour, period in FORECAST_PERIOD_JOBS:
         active_scheduler.add_job(
@@ -143,7 +197,7 @@ def register_forecast_jobs() -> None:
         )
     log.warning(
         "Forecast periódico ativo: 3 jobs (06/14/20h ±15min) → %s",
-        settings.forecast_group_jid,
+        settings.forecast_group_jid or "somente grupos inscritos",
     )
 
 

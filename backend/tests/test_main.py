@@ -105,7 +105,8 @@ def test_forecast_jobs_registered_when_group_set(monkeypatch):
     scheduler.remove_all_jobs()
 
 
-def test_forecast_jobs_skipped_without_group(monkeypatch):
+def test_forecast_jobs_registered_without_main_group(monkeypatch):
+    """Grupos inscritos recebem o boletim mesmo sem FORECAST_GROUP_JID."""
     monkeypatch.setattr(main_module.settings, "forecast_group_jid", "")
     if scheduler.running:
         scheduler.shutdown(wait=False)
@@ -114,15 +115,21 @@ def test_forecast_jobs_skipped_without_group(monkeypatch):
     main_module.register_forecast_jobs()
 
     for job_id, _, _ in FORECAST_PERIOD_JOBS:
-        assert scheduler.get_job(job_id) is None
+        assert scheduler.get_job(job_id) is not None
+
+    scheduler.remove_all_jobs()
 
 
-def test_send_period_forecast_skips_when_no_jid(monkeypatch, caplog):
+def test_send_period_forecast_skips_when_no_target(monkeypatch, caplog):
     monkeypatch.setattr(main_module.settings, "forecast_group_jid", "")
 
-    async def boom():
+    async def no_groups():
+        return []
+
+    async def boom(*args, **kwargs):
         raise AssertionError("should not fetch")
 
+    monkeypatch.setattr(main_module, "list_active_groups", no_groups)
     monkeypatch.setattr(main_module, "build_period_forecast", boom)
 
     asyncio.run(send_period_forecast("morning"))
@@ -131,6 +138,9 @@ def test_send_period_forecast_skips_when_no_jid(monkeypatch, caplog):
 
 def test_send_period_forecast_sends(monkeypatch):
     monkeypatch.setattr(main_module.settings, "forecast_group_jid", "1203630@g.us")
+
+    async def no_groups():
+        return []
 
     async def fake_build(period):
         return f"boletim-{period}"
@@ -142,6 +152,7 @@ def test_send_period_forecast_sends(monkeypatch):
         sent["message"] = message
         return {"status": "sent"}
 
+    monkeypatch.setattr(main_module, "list_active_groups", no_groups)
     monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
     monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
 

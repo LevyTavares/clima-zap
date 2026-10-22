@@ -100,6 +100,83 @@ def test_failed_forecast_is_added_to_alert_history(test_database, monkeypatch):
     assert alert_log.recipient == "forecast-group"
 
 
+def test_period_forecast_fans_out_to_subscribed_groups(test_database, monkeypatch):
+    """Boletim vai para o grupo principal + grupos inscritos, sem duplicar."""
+    monkeypatch.setattr(main_module.settings, "forecast_group_jid", "1203630@g.us")
+
+    async def create_subscribers():
+        async with test_database() as session:
+            session.add(Subscriber(phone="1203630@g.us", city="Crato", is_active=True))
+            session.add(Subscriber(phone="1203631@g.us", city="Crato", is_active=True))
+            session.add(
+                Subscriber(
+                    phone="1203632@g.us",
+                    city="Fortaleza, Ceará",
+                    latitude=-3.73,
+                    longitude=-38.53,
+                    is_active=True,
+                )
+            )
+            # PV inscrito não recebe boletim (só os alertas climáticos)
+            session.add(Subscriber(phone="+15551234567", city="Crato", is_active=True))
+            await session.commit()
+
+    asyncio.run(create_subscribers())
+
+    built = []
+    sent = []
+
+    async def fake_build(period, location=None):
+        built.append((period, location["name"] if location else None))
+        return f"boletim-{location['name'] if location else 'padrão'}"
+
+    async def fake_send(recipient, message):
+        sent.append((recipient, message))
+        return {"status": "sent"}
+
+    monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
+    monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
+
+    asyncio.run(main_module.send_period_forecast("morning"))
+
+    assert sent == [
+        ("1203630@g.us", "boletim-Crato"),
+        ("1203631@g.us", "boletim-Crato"),
+        ("1203632@g.us", "boletim-Fortaleza, Ceará"),
+    ]
+    # Dois locais distintos → dois builds (Crato é compartilhado pelos 2 grupos).
+    assert built == [("morning", "Crato"), ("morning", "Fortaleza, Ceará")]
+
+
+def test_period_forecast_without_main_group_uses_subscribed_groups(
+    test_database, monkeypatch
+):
+    monkeypatch.setattr(main_module.settings, "forecast_group_jid", "")
+
+    async def create_subscriber():
+        async with test_database() as session:
+            session.add(Subscriber(phone="1203639@g.us", city="Crato", is_active=True))
+            await session.commit()
+
+    asyncio.run(create_subscriber())
+
+    sent = []
+
+    async def fake_build(period, location=None):
+        return f"boletim-{period}-{location['name'] if location else 'padrão'}"
+
+    async def fake_send(recipient, message):
+        sent.append((recipient, message))
+        return {"status": "sent"}
+
+    monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
+    monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
+
+    asyncio.run(main_module.send_period_forecast("night"))
+
+    assert sent == [("1203639@g.us", "boletim-night-Crato")]
+
+
 def test_weather_alert_is_sent_to_active_subscriber(test_database, monkeypatch):
     async def create_subscriber():
         async with test_database() as session:

@@ -106,7 +106,7 @@ def test_period_greeting_and_weather_code():
 
 
 def test_build_period_forecast_uses_hourly(monkeypatch):
-    async def mock_fetch():
+    async def mock_fetch(_location=None):
         return WeatherData(
             latitude=-7.31,
             longitude=-39.31,
@@ -124,6 +124,33 @@ def test_build_period_forecast_uses_hourly(monkeypatch):
     msg = asyncio.run(build_period_forecast("morning", now=now))
     assert "Manhã" in msg
     assert "Temperatura" in msg
+
+
+def test_build_period_forecast_uses_group_location(monkeypatch):
+    seen = {}
+
+    async def mock_fetch(location=None):
+        seen["location"] = location
+        return WeatherData(
+            latitude=-7.31,
+            longitude=-39.31,
+            current=CurrentWeather(
+                temperature_2m=28.0,
+                relative_humidity_2m=50,
+                rain=0,
+                uv_index=5,
+            ),
+            hourly=_hourly_fixture(),
+        )
+
+    monkeypatch.setattr("app.services.forecast.fetch_cariri_weather", mock_fetch)
+    now = datetime(2026, 9, 23, 7, 0)
+    location = {"name": "Crato", "latitude": -7.2342, "longitude": -39.4086}
+
+    msg = asyncio.run(build_period_forecast("morning", now=now, location=location))
+
+    assert seen["location"] == location
+    assert "Crato" in msg
 
 
 def test_build_current_forecast(monkeypatch):

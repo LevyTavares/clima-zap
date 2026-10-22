@@ -54,7 +54,7 @@ async def _find_subscriber(session, phone: str) -> Subscriber | None:
     return result.scalar_one_or_none()
 
 
-def _subscriber_location(subscriber: Subscriber | None) -> LocationData | None:
+def subscriber_location(subscriber: Subscriber | None) -> LocationData | None:
     """Coords salvas > cidade preset legada > None (região padrão)."""
     if subscriber is None:
         return None
@@ -77,7 +77,7 @@ async def get_subscriber_location(phone: str) -> LocationData | None:
     else:
         async with db_session.SessionLocal() as session:
             subscriber = await _find_subscriber(session, phone)
-    return _subscriber_location(subscriber)
+    return subscriber_location(subscriber)
 
 
 async def subscribe_recipient(phone: str, name: str | None = None) -> dict:
@@ -173,6 +173,15 @@ async def list_active_subscribers() -> list[Subscriber]:
             orm.select(orm.Subscriber).where(orm.Subscriber.is_active.is_(True))
         )
         return list(result.scalars())
+
+
+async def list_active_groups() -> list[Subscriber]:
+    """Assinantes ativos cujo destino é grupo (JID terminando em ``@g.us``)."""
+    return [
+        subscriber
+        for subscriber in await list_active_subscribers()
+        if subscriber.phone.endswith("@g.us")
+    ]
 
 
 async def group_active_subscribers_by_city() -> dict[str, list[Subscriber]]:

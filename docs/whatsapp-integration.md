@@ -128,7 +128,7 @@ If `WEBHOOK_AUTH_TOKEN` is set, `POST /api/v1/webhook` requires the header `Auth
 
 ## Periodic Group Forecast
 
-If `FORECAST_GROUP_JID` is set (group JID ending in `@g.us`), the backend registers three APScheduler jobs that push a period bulletin to that group:
+The backend registers three APScheduler jobs that push a period bulletin to `FORECAST_GROUP_JID` (when set) **and to every active group subscriber** — groups that ran `/inscrever` (JID ending in `@g.us`). Each group receives the bulletin for its own saved location (`/configuracao`/`/cidade`); groups without a location get the default region, and targets are deduplicated.
 
 | Job | Base hour (America/Fortaleza) | Period covered | Jitter |
 |-----|------------------------------|----------------|--------|
@@ -136,7 +136,7 @@ If `FORECAST_GROUP_JID` is set (group JID ending in `@g.us`), the backend regist
 | `forecast_afternoon` | 14:00 | 12h–18h | 0–15 min |
 | `forecast_night` | 20:00 | 18h–06h (next day) | 0–15 min |
 
-Jobs are **not registered** when `FORECAST_GROUP_JID` is empty. To find the JID: send any message in the group and read `remoteJid` in webhook/Evolution logs (ends with `@g.us`).
+Jobs are registered even when `FORECAST_GROUP_JID` is empty — the bulletins then go only to subscribed groups. Private chats (DMs) do **not** receive bulletins, only weather alerts. To find a group JID: subscribe it with `/inscrever` or read `remoteJid` in webhook/Evolution logs (ends with `@g.us`).
 
 Replies to commands sent **inside a group** also go to the group (full JID preserved).
 
@@ -184,7 +184,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | Webhook not receiving | Check Evolution API logs, verify URL |
 | Messages not sending | Verify API key, check instance connection |
 | QR code not appearing | Restart Evolution API container |
-| No periodic bulletin in group | Set `FORECAST_GROUP_JID` in root `.env`, `docker compose up -d backend`, check startup log for `Forecast periódico ativo` |
+| No periodic bulletin in group | Set `FORECAST_GROUP_JID` in root `.env` or subscribe the group with `/inscrever`; restart the backend and check startup log for `Forecast periódico ativo` |
 | Bulletin job registered but no message | Check backend logs for `Forecast ... enviado` / errors; verify Evolution instance `connectionState` |
 
 ## References

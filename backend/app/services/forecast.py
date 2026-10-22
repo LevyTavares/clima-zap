@@ -123,9 +123,17 @@ def aggregate_period_hourly(hourly, period: Period, now: datetime | None = None)
     }
 
 
-async def build_period_forecast(period: Period, now: datetime | None = None) -> str:
-    """Boletim por período (manhã/tarde/noite) a partir do fetch horário."""
-    w = await fetch_cariri_weather()
+async def build_period_forecast(
+    period: Period,
+    now: datetime | None = None,
+    location: LocationData | None = None,
+) -> str:
+    """Boletim por período (manhã/tarde/noite) a partir do fetch horário.
+
+    ``location`` None usa a região padrão; os grupos inscritos passam o próprio
+    local para receber o boletim da cidade configurada neles.
+    """
+    w = await fetch_cariri_weather(location)
     if w.hourly is None:
         raise ValueError("Resposta sem dados horários")
 
@@ -134,7 +142,7 @@ async def build_period_forecast(period: Period, now: datetime | None = None) -> 
         raise ValueError(f"Sem dados horários para período {period!r}")
 
     summary = format_period_summary(
-        city=settings.default_city,
+        city=location["name"] if location else settings.default_city,
         period=period,
         temp_min=agg["temp_min"],
         temp_max=agg["temp_max"],
