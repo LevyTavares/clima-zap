@@ -28,13 +28,15 @@ def make_payload(command_or_text: str) -> dict:
     }
 
 
-def test_webhook_invalid_payload(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_webhook_invalid_payload():
     """Testa se o webhook trata adequadamente um payload malformado ou vazio."""
     response = client.post("/api/v1/webhook", json={})
     assert response.status_code in (200, 400, 422)
 
 
-def test_webhook_clima_command(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_webhook_clima_command():
     """Testa a execução do comando /clima via mensagem recebida."""
     payload = make_payload("/clima")
     with patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock, create=True), \
@@ -43,7 +45,8 @@ def test_webhook_clima_command(test_database):
         assert response.status_code == 200
 
 
-def test_webhook_help_command(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_webhook_help_command():
     """Testa o comando /ajuda retornando as opções de menu."""
     payload = make_payload("/ajuda")
     with patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock, create=True), \
@@ -52,7 +55,8 @@ def test_webhook_help_command(test_database):
         assert response.status_code == 200
 
 
-def test_configuracao_with_coordinates(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_configuracao_with_coordinates():
     """Testa a configuração de localização por coordenadas numéricas (lat, lon)."""
     payload = make_payload("/configuracao -7.23,-39.31")
     with patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock, create=True), \
@@ -61,7 +65,8 @@ def test_configuracao_with_coordinates(test_database):
         assert response.status_code == 200
 
 
-def test_configuracao_geocodes_cities_outside_presets(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_configuracao_geocodes_cities_outside_presets():
     """Testa a configuração de cidade fora da lista pré-definida via serviço de geolocalização."""
     payload = make_payload("/configuracao fortaleza")
     mock_geo = {
@@ -78,7 +83,8 @@ def test_configuracao_geocodes_cities_outside_presets(test_database):
         assert response.status_code == 200
 
 
-def test_unknown_local_lists_options_when_geocode_misses(test_database):
+@pytest.mark.usefixtures("test_database")
+def test_unknown_local_lists_options_when_geocode_misses():
     """Testa o comportamento do bot quando a cidade informada não é encontrada pela geolocalização."""
     payload = make_payload("/configuracao Atlantis")
     with patch("app.core.location.get_location_coords", return_value=None), \
