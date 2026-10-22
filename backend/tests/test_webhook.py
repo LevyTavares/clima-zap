@@ -46,6 +46,39 @@ def test_webhook_clima_command():
 
 
 @pytest.mark.usefixtures("test_database")
+def test_webhook_natural_language_keyword():
+    """Testa mensagem em linguagem natural sem barra (ex: 'como tá o tempo hoje?')."""
+    payload = make_payload("como tá o tempo hoje?")
+    with patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock) as mock_send, \
+         patch("app.api.webhook.build_current_forecast", new_callable=AsyncMock, return_value="Previsão de Teste"):
+        response = client.post("/api/v1/webhook", json=payload)
+        assert response.status_code == 200
+        mock_send.assert_called_once()
+
+
+@pytest.mark.usefixtures("test_database")
+def test_webhook_numeric_shortcut():
+    """Testa a seleção rápida de cidade pelo número '1' (Barbalha)."""
+    payload = make_payload("1")
+    with patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock) as mock_send:
+        response = client.post("/api/v1/webhook", json=payload)
+        assert response.status_code == 200
+        mock_send.assert_called_once()
+
+
+@pytest.mark.usefixtures("test_database")
+def test_webhook_forecast_timeout_fallback():
+    """Testa o tratamento de exceção quando a API de clima falha/timeout."""
+    payload = make_payload("/clima")
+    with patch("app.api.webhook.build_current_forecast", side_effect=Exception("Timeout na API")), \
+         patch("app.api.webhook.send_whatsapp_message", new_callable=AsyncMock) as mock_send:
+        response = client.post("/api/v1/webhook", json=payload)
+        assert response.status_code == 200
+        mock_send.assert_called_once()
+        assert "instabilidade" in mock_send.call_args[0][1]
+
+
+@pytest.mark.usefixtures("test_database")
 def test_webhook_help_command():
     """Testa o comando /ajuda retornando as opções de menu."""
     payload = make_payload("/ajuda")
