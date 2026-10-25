@@ -237,6 +237,38 @@ def test_admin_password_is_not_written_to_logs(
     assert "credenciais omitidas" in caplog.text
 
 
+def test_admin_password_is_redacted_on_typo(
+    admin_password, monkeypatch, caplog
+):  # pylint: disable=unused-argument
+    async def fake_send(_recipient, _message):
+        return {"status": "sent"}
+
+    async def not_duplicate(_message_id):
+        return False
+
+    monkeypatch.setattr(webhook, "send_whatsapp_message", fake_send)
+    monkeypatch.setattr(webhook, "is_duplicate_message", not_duplicate)
+
+    payload = WebhookPayload(
+        event="MESSAGES_UPSERT",
+        instance="clima-zap",
+        data={
+            "key": {
+                "remoteJid": f"{RECIPIENT}@s.whatsapp.net",
+                "fromMe": False,
+                "id": "admin-typo-log-test",
+            },
+            "message": {"conversation": f"/admn {admin_password} ping"},
+        },
+    )
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(webhook.process_event_background(payload))
+
+    assert admin_password not in caplog.text
+    assert "credenciais omitidas" in caplog.text
+
+
 def test_recent_alert_dispatches_local(test_database):  # pylint: disable=unused-argument
     async def flow():
         await record_alert_dispatch("forecast_morning", GROUP_JID, "sent")

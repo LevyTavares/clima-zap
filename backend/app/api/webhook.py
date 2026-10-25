@@ -273,8 +273,14 @@ async def process_event_background(payload: WebhookPayload):
 
     recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
-    if invocation is not None and invocation.command == "admin":
+    admin_password = settings.admin_password.get_secret_value()
+    admin_attempt = (
+        invocation is not None and invocation.command == "admin"
+    ) or (bool(admin_password) and admin_password in message_text)
+    if admin_attempt:
         # Nunca registre a senha em log (o texto completo iria para o stdout).
+        # A checagem por substring cobre erros de digitação (ex.: `/admn ...`)
+        # e mensagens enviadas sem o `/`.
         logger.info("Mensagem de %s: /admin (credenciais omitidas)", sender)
     else:
         logger.info("Mensagem de %s: %s", sender, message_text)
