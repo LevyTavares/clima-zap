@@ -15,6 +15,7 @@ from app.core.config import ROOT_DIR, settings
 from app.core.cors import SettingsCORSMiddleware
 from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city
 from app.core.schedule import (
+    ADMIN_SESSION_CHECK_MINUTES,
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_JOBS,
@@ -23,6 +24,11 @@ from app.core.schedule import (
 from app.db import d1
 from app.db.errors import storage_errors
 from app.db.session import get_db
+from app.services.admin_sessions import (
+    EXPIRY_NOTIFICATION_TEXT,
+    list_expired_admin_sessions,
+    mark_admin_session_notified,
+)
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
@@ -83,6 +89,47 @@ async def process_scheduled_weather_alerts() -> dict[str, int]:
             summary["alerts"] += 1
             logger.warning("Alerta climático programado: %s", alert)
         await dispatch_weather_alerts(alerts, subscribers=subscribers)
+    return summary
+
+
+async def process_expired_admin_sessions() -> dict[str, int]:
+    """Avisa no WhatsApp as sessões administrativas recém-vencidas.
+
+    Cada sessão recebe o aviso uma única vez (``notified_at``). Se o envio
+    falhar, o aviso fica pendente e é tentado de novo no próximo ciclo.
+    """
+    summary = {"expired": 0, "notified": 0, "failed": 0}
+    try:
+        sessions = await list_expired_admin_sessions()
+    except storage_errors() as error:
+        logger.error("Erro ao buscar sessões admin expiradas: %s", error)
+        return summary
+
+    summary["expired"] = len(sessions)
+    for session in sessions:
+        phone = str(session.get("phone", ""))
+        if not phone:
+            continue
+        try:
+            result = await send_whatsapp_message(phone, EXPIRY_NOTIFICATION_TEXT)
+            logger.warning(
+                "Aviso de expiração admin enviado para %s: %s", phone, result
+            )
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "Erro ao avisar sessão admin expirada de %s: %s", phone, error
+            )
+            summary["failed"] += 1
+            continue
+        try:
+            await mark_admin_session_notified(phone)
+        except storage_errors() as error:
+            logger.error(
+                "Erro ao marcar aviso de sessão admin de %s: %s", phone, error
+            )
+            summary["failed"] += 1
+            continue
+        summary["notified"] += 1
     return summary
 
 
@@ -217,6 +264,24 @@ def register_forecast_jobs() -> None:
     )
 
 
+def register_admin_session_job() -> None:
+    """Verifica sessões administrativas vencidas a cada 5min (só no Docker).
+
+    No Workers a mesma verificação roda pelo Cron Trigger ``*/5 * * * *``
+    (``backend/worker.py``).
+    """
+    active_scheduler = scheduler
+    if active_scheduler is None:
+        return
+    active_scheduler.add_job(
+        process_expired_admin_sessions,
+        trigger="interval",
+        minutes=ADMIN_SESSION_CHECK_MINUTES,
+        id="admin_session_expiry",
+        replace_existing=True,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     active_scheduler = scheduler
@@ -239,6 +304,7 @@ async def lifespan(_: FastAPI):
     # Retenção do histórico: um prune por dia, na hora do boletim da noite.
     register_maintenance_job()
     register_forecast_jobs()
+    register_admin_session_job()
     active_scheduler.start()
     try:
         yield

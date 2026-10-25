@@ -39,3 +39,20 @@ class AlertLog(Base):
         ForeignKey("subscribers.id", ondelete="SET NULL"), nullable=True
     )
     subscriber: Mapped[Subscriber | None] = relationship(back_populates="alert_logs")
+
+
+class AdminSession(Base):
+    """Sessão administrativa de 7 dias, vinculada ao telefone que se registrou.
+
+    O ``password_fingerprint`` invalida as sessões quando ``ADMIN_PASSWORD``
+    muda: o hash é recalculado a cada autenticação e comparado no banco.
+    """
+
+    __tablename__ = "admin_sessions"
+
+    phone: Mapped[str] = mapped_column(String(64), primary_key=True)
+    password_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    registered_at: Mapped[float] = mapped_column(Float, nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    # None = aviso de expiração ainda não enviado (ou sessão renovada).
+    notified_at: Mapped[float | None] = mapped_column(Float, nullable=True)

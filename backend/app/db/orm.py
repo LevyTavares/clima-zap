@@ -7,6 +7,13 @@ importam **dentro** do ramo ``worker_runtime.on_workers() is False``.
 
 from sqlalchemy import delete, select, text
 
-from app.models import AlertLog, Subscriber
+from app.models import AdminSession, AlertLog, Subscriber
 
-__all__ = ["AlertLog", "Subscriber", "delete", "select", "text"]
+__all__ = [
+    "AdminSession",
+    "AlertLog",
+    "Subscriber",
+    "delete",
+    "select",
+    "text",
+]

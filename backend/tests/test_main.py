@@ -3,7 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.core.schedule import MAINTENANCE_HOUR
+from app.core.schedule import ADMIN_SESSION_CHECK_MINUTES, MAINTENANCE_HOUR
 from app.main import (
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_JOBS,
@@ -57,6 +57,20 @@ def test_prune_do_historico_agendado_na_hora_de_manutencao():
     assert job is not None
     assert str(job.trigger.fields[5]) == str(MAINTENANCE_HOUR)
     assert str(job.trigger.fields[6]) == "0"
+
+    scheduler.remove_all_jobs()
+
+
+def test_sessao_admin_verificada_a_cada_5min_no_docker():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+    scheduler.remove_all_jobs()
+
+    main_module.register_admin_session_job()
+
+    job = scheduler.get_job("admin_session_expiry")
+    assert job is not None
+    assert job.trigger.interval.total_seconds() == ADMIN_SESSION_CHECK_MINUTES * 60
 
     scheduler.remove_all_jobs()
 

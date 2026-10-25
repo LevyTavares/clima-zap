@@ -10,9 +10,9 @@ from app.api import webhook
 from app.api.webhook import route_command
 from app.core.config import settings
 from app.domain import Subscriber
-from app.models import AlertLog  # noqa: F401  pylint: disable=unused-import
+from app.models import AdminSession, AlertLog  # noqa: F401  pylint: disable=unused-import
 from app.schemas.webhook import WebhookPayload
-from app.services import admin_commands
+from app.services import admin_commands, admin_sessions
 from app.services.alert_history import recent_alert_dispatches, record_alert_dispatch
 
 RECIPIENT = "5588999999999"
@@ -77,6 +77,8 @@ def test_admin_help_lists_actions_without_echoing_password(admin_password):
     assert "status" in reply
     assert "boletim" in reply
     assert "alertas" in reply
+    assert "register" in reply
+    assert "logout" in reply
     assert admin_password not in reply
 
 
@@ -203,6 +205,73 @@ def test_admin_ping(admin_password):
     reply = run_admin(f"{admin_password} ping")
 
     assert "pong" in reply
+
+
+def test_admin_register_libera_acoes_por_7_dias(
+    admin_password, test_database, monkeypatch
+):  # pylint: disable=unused-argument
+    async def fake_status():
+        return {"instance": {"state": "open"}}
+
+    monkeypatch.setattr(admin_commands, "check_whatsapp_status", fake_status)
+
+    registered = run_admin(f"register {admin_password}")
+    ping = run_admin("ping")
+    status = run_admin("status")
+    logged_out = run_admin("logout")
+    after_logout = run_admin("ping")
+
+    assert "Administração liberada" in registered
+    assert "7 dias" in registered
+    assert admin_password not in registered
+    assert "pong" in ping
+    assert "Sessão admin: expira em" in status
+    assert "encerrada" in logged_out
+    assert "Sessão administrativa necessária" in after_logout
+
+
+def test_admin_register_aceita_prefixo_com_dois_hifens(admin_password, test_database):  # pylint: disable=unused-argument
+    reply = run_admin(f"register --{admin_password}")
+
+    assert "Administração liberada" in reply
+    assert admin_password not in reply
+
+
+def test_admin_register_rejeita_senha_errada(admin_password, test_database):  # pylint: disable=unused-argument
+    reply = run_admin("register senha-errada")
+
+    assert "inválida" in reply
+    assert "Administração liberada" not in reply
+
+
+def test_admin_acao_sem_sessao_pede_registro(admin_password, test_database):  # pylint: disable=unused-argument
+    reply = run_admin("status")
+
+    assert "Sessão administrativa necessária" in reply
+    assert "`/admin register <senha>`" in reply
+
+
+def test_admin_sessao_expirada_nao_autentica(admin_password, test_database):  # pylint: disable=unused-argument
+    asyncio.run(
+        admin_sessions.register_admin_session(
+            RECIPIENT,
+            admin_sessions.password_fingerprint(admin_password),
+            now=0.0,
+        )
+    )
+
+    reply = run_admin("ping")
+
+    assert "Sessão administrativa necessária" in reply
+
+
+def test_admin_troca_de_senha_invalida_sessao(admin_password, test_database):  # pylint: disable=unused-argument
+    run_admin(f"register {admin_password}")
+    settings.admin_password = SecretStr("outra-senha-administrativa")
+
+    reply = run_admin("ping")
+
+    assert "Sessão administrativa necessária" in reply
 
 
 def test_admin_password_is_not_written_to_logs(

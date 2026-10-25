@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from app.core import worker_runtime
 from app.core.config import settings
 from app.db import d1
-from app.services import alert_history, persistence
+from app.services import admin_sessions, alert_history, persistence
 
 # ---------------------------------------------------------------------------
 # Fake do D1Database (memória) — casa exatamente as SQL usadas pelo adapter.
@@ -52,6 +52,7 @@ class FakeD1:
         self.alert_logs: list[dict] = []
         self.seen: dict[str, float] = {}
         self.dm_hints: dict[str, float] = {}
+        self.admin_sessions: dict[str, dict] = {}
         self._next_id = 1
 
     def prepare(self, sql: str) -> FakeStatement:
@@ -182,6 +183,51 @@ class FakeD1:
                 changes = 0
             else:
                 self.dm_hints[params[0]] = params[1]
+                changes = 1
+
+        elif sql.startswith("INSERT INTO admin_sessions"):
+            self.admin_sessions[params[0]] = {
+                "phone": params[0],
+                "password_fingerprint": params[1],
+                "registered_at": params[2],
+                "expires_at": params[3],
+                "notified_at": None,
+            }
+            changes = 1
+
+        elif (
+            "FROM admin_sessions WHERE phone = ?"
+            " AND password_fingerprint = ? AND expires_at > ?" in sql
+        ):
+            session = self.admin_sessions.get(params[0])
+            if (
+                session
+                and session["password_fingerprint"] == params[1]
+                and session["expires_at"] > params[2]
+            ):
+                rows = [dict(session)]
+
+        elif (
+            "FROM admin_sessions WHERE expires_at <= ?"
+            " AND notified_at IS NULL" in sql
+        ):
+            expired = [
+                dict(session)
+                for session in self.admin_sessions.values()
+                if session["expires_at"] <= params[0]
+                and session["notified_at"] is None
+            ]
+            expired.sort(key=lambda session: session["expires_at"])
+            rows = expired[: params[1]]
+
+        elif sql == "UPDATE admin_sessions SET notified_at = ? WHERE phone = ?":
+            session = self.admin_sessions.get(params[1])
+            if session is not None:
+                session["notified_at"] = params[0]
+                changes = 1
+
+        elif sql == "DELETE FROM admin_sessions WHERE phone = ?":
+            if self.admin_sessions.pop(params[0], None) is not None:
                 changes = 1
 
         elif sql == "DELETE FROM seen_messages WHERE seen_at < ?":
@@ -425,6 +471,40 @@ def test_recent_alert_dispatches_via_d1(workers_env):  # pylint: disable=unused-
     assert rows[0]["alert_type"] == "weather_alert"
     assert rows[0]["recipient"] == "+5599"
     assert rows[0]["delivery_status"] == "failed"
+
+
+def test_sessao_administrativa_via_d1(workers_env):  # pylint: disable=unused-argument
+    phone = "+5588999999999"
+    fingerprint = admin_sessions.password_fingerprint("senha-de-teste")
+
+    async def flow():
+        expires = await admin_sessions.register_admin_session(
+            phone, fingerprint, now=1_000.0
+        )
+        active = await admin_sessions.get_admin_session(
+            phone, fingerprint, now=1_001.0
+        )
+        wrong_password = await admin_sessions.get_admin_session(
+            phone, "outro-fingerprint", now=1_001.0
+        )
+        expired_at = 1_000.0 + admin_sessions.ADMIN_SESSION_SECONDS + 1
+        expired = await admin_sessions.list_expired_admin_sessions(now=expired_at)
+        await admin_sessions.mark_admin_session_notified(phone, notified_at=expired_at)
+        after_notice = await admin_sessions.list_expired_admin_sessions(now=expired_at)
+        revoked = await admin_sessions.revoke_admin_session(phone)
+        return expires, active, wrong_password, expired, after_notice, revoked
+
+    expires, active, wrong_password, expired, after_notice, revoked = asyncio.run(
+        flow()
+    )
+
+    assert expires == 1_000.0 + admin_sessions.ADMIN_SESSION_SECONDS
+    assert active["phone"] == phone
+    assert wrong_password is None
+    assert [session["phone"] for session in expired] == [phone]
+    assert after_notice == []
+    assert revoked is True
+    assert not workers_env.DB.admin_sessions
 
 
 # ---------------------------------------------------------------------------

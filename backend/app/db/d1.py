@@ -206,6 +206,66 @@ async def recent_alert_dispatches(limit: int = 5) -> list[dict]:
     return _rows(result)
 
 
+async def register_admin_session(
+    phone: str,
+    password_fingerprint: str,
+    registered_at: float,
+    expires_at: float,
+) -> None:
+    """Cria/renova a sessão administrativa do telefone (7 dias)."""
+    await _db().prepare(
+        "INSERT INTO admin_sessions"
+        " (phone, password_fingerprint, registered_at, expires_at, notified_at)"
+        " VALUES (?, ?, ?, ?, NULL)"
+        " ON CONFLICT(phone) DO UPDATE SET"
+        " password_fingerprint = excluded.password_fingerprint,"
+        " registered_at = excluded.registered_at,"
+        " expires_at = excluded.expires_at,"
+        " notified_at = NULL"
+    ).bind(phone, password_fingerprint, registered_at, expires_at).run()
+
+
+async def get_admin_session(
+    phone: str, password_fingerprint: str, now: float
+) -> dict | None:
+    """Sessão ativa do telefone, ou None (expirada/senha trocada/sem registro)."""
+    result = await _db().prepare(
+        "SELECT phone, password_fingerprint, registered_at, expires_at, notified_at"
+        " FROM admin_sessions"
+        " WHERE phone = ? AND password_fingerprint = ? AND expires_at > ?"
+    ).bind(phone, password_fingerprint, now).all()
+    rows = _rows(result)
+    return rows[0] if rows else None
+
+
+async def delete_admin_session(phone: str) -> bool:
+    """Encerra a sessão (logout); True se havia uma linha."""
+    result = await _db().prepare(
+        "DELETE FROM admin_sessions WHERE phone = ?"
+    ).bind(phone).run()
+    return _changes(result) > 0
+
+
+async def list_expired_admin_sessions(
+    now: float, limit: int = 50
+) -> list[dict]:
+    """Sessões expiradas que ainda não receberam o aviso de expiração."""
+    result = await _db().prepare(
+        "SELECT phone, password_fingerprint, registered_at, expires_at, notified_at"
+        " FROM admin_sessions"
+        " WHERE expires_at <= ? AND notified_at IS NULL"
+        " ORDER BY expires_at ASC LIMIT ?"
+    ).bind(now, max(1, min(int(limit), 100))).all()
+    return _rows(result)
+
+
+async def mark_admin_session_notified(phone: str, notified_at: float) -> None:
+    """Marca o aviso de expiração como enviado (evita mensagem duplicada)."""
+    await _db().prepare(
+        "UPDATE admin_sessions SET notified_at = ? WHERE phone = ?"
+    ).bind(notified_at, phone).run()
+
+
 async def is_duplicate_message(message_id: str) -> bool:
     """Marca message_id como visto; True se já havia sido visto (duplicado)."""
     database = _db()

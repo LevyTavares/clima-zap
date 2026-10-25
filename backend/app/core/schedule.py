@@ -34,11 +34,15 @@ FORECAST_PERIOD_BY_HOUR: dict[int, Period] = {
 # com os alertas.
 MAINTENANCE_HOUR = 20
 
-# Expressões em `triggers.crons` do wrangler.jsonc (em UTC). Os dois crons
-# coincidem em 06h e 14h BRT — ver ``cron_dispatch``.
+# Expressões em `triggers.crons` do wrangler.jsonc (em UTC). Os dois crons de
+# alertas/boletins coincidem em 06h e 14h BRT — ver ``cron_dispatch``.
 ALERTS_CRON = "0 9,11,15,17,19,21 * * *"
 BULLETINS_CRON = "0 9,17,23 * * *"
-CRON_EXPRESSIONS = (ALERTS_CRON, BULLETINS_CRON)
+# Aviso de sessão administrativa expirada: roda a cada 5min (o vencimento cai
+# em qualquer minuto; não há como agendar um cron por sessão no Workers).
+ADMIN_SESSION_CHECK_MINUTES = 5
+ADMIN_SESSION_CRON = "*/5 * * * *"
+CRON_EXPRESSIONS = (ALERTS_CRON, BULLETINS_CRON, ADMIN_SESSION_CRON)
 
 # Cron Triggers têm 15min de wall time por invocação. O jitter dorme dentro do
 # próprio handler, então reservamos uma margem para o envio (HTTP + D1) caber
@@ -70,9 +74,15 @@ def cron_dispatch(cron: str) -> tuple[bool, bool]:
 
     Sem esse despacho o handler rodaria duas vezes em 06h e 14h BRT (as duas
     expressões coincidem nesses horários) duplicando alertas e boletins.
-    Expressões desconhecidas caem no despacho por hora, como antes.
+    Expressões desconhecidas caem no despacho por hora, como antes; o cron de
+    sessão administrativa é conhecido e não dispara nenhum dos dois.
     """
     cron = (cron or "").strip()
     if cron not in CRON_EXPRESSIONS:
         return True, True
     return cron == ALERTS_CRON, cron == BULLETINS_CRON
+
+
+def is_admin_session_cron(cron: str) -> bool:
+    """True para a expressão que verifica sessões administrativas vencidas."""
+    return (cron or "").strip() == ADMIN_SESSION_CRON

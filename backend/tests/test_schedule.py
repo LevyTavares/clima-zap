@@ -68,6 +68,12 @@ def test_cron_dispatch_nao_duplica_alertas_e_boletins():
     assert schedule.cron_dispatch(schedule.BULLETINS_CRON) == (False, True)
 
 
+def test_cron_dispatch_da_sessao_admin_nao_dispara_outros_jobs():
+    assert schedule.cron_dispatch(schedule.ADMIN_SESSION_CRON) == (False, False)
+    assert schedule.is_admin_session_cron(schedule.ADMIN_SESSION_CRON) is True
+    assert schedule.is_admin_session_cron(schedule.ALERTS_CRON) is False
+
+
 def test_cron_dispatch_expressao_desconhecida_cai_no_filtro_por_hora():
     assert schedule.cron_dispatch("0 9 * * *") == (True, True)
     assert schedule.cron_dispatch("") == (True, True)
@@ -76,7 +82,11 @@ def test_cron_dispatch_expressao_desconhecida_cai_no_filtro_por_hora():
 def test_crons_do_wrangler_espelham_as_constantes():
     crons = _wrangler_crons()
 
-    assert crons == [schedule.ALERTS_CRON, schedule.BULLETINS_CRON]
+    assert crons == [
+        schedule.ALERTS_CRON,
+        schedule.BULLETINS_CRON,
+        schedule.ADMIN_SESSION_CRON,
+    ]
 
 
 def test_horas_utc_dos_crons_equivalem_as_horas_brt():
@@ -90,3 +100,8 @@ def test_manutencao_pega_carona_na_hora_exclusiva_dos_boletins():
     """O purge diário (20h BRT) não pode coincidir com uma hora de alertas."""
     assert schedule.MAINTENANCE_HOUR in schedule.FORECAST_PERIOD_BY_HOUR
     assert schedule.MAINTENANCE_HOUR not in schedule.ALERT_SCHEDULE_HOURS
+
+
+def test_verificacao_de_sessao_admin_roda_a_cada_5min():
+    assert schedule.ADMIN_SESSION_CHECK_MINUTES == 5
+    assert schedule.ADMIN_SESSION_CRON == "*/5 * * * *"

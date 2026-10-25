@@ -366,8 +366,9 @@ uvx --from workers-py pywrangler deploy
   `wrangler.jsonc` (ex.: `"CORS_ORIGINS": "https://clima-zap.vercel.app"`).
   Vazio = nenhuma origem cross-origin; `*` é ignorado de propósito
 - **Webhook da Evolution:** `https://clima-zap-api.<subdominio>.workers.dev/api/v1/webhook`
-- **Cron Triggers:** alertas `0 9,11,15,17,19,21 * * *` (06/08/12/14/16/18h BRT) e
-  boletins `0 9,17,23 * * *` (06/14/20h BRT) — America/Fortaleza = UTC-3 fixo.
+- **Cron Triggers:** alertas `0 9,11,15,17,19,21 * * *` (06/08/12/14/16/18h BRT),
+  boletins `0 9,17,23 * * *` (06/14/20h BRT) e verificação de sessão admin
+  `*/5 * * * *` — America/Fortaleza = UTC-3 fixo.
   Cada expressão dispara só o job dela (as duas coincidem em 06h/14h BRT, sem
   isso os envios duplicariam) e o boletim aguarda o jitter anti-spam 0–15min
   antes do envio — expressões e jitter em `app/core/schedule.py`
@@ -442,22 +443,33 @@ Os comandos valem em **duas formas de invocação**:
 
 ### Administração (`/admin`)
 
-Comando protegido por senha (`ADMIN_PASSWORD`) e disponível **apenas no
-privado**; em grupo o bot responde como comando desconhecido para não expor a
+O acesso é liberado **por número** e dura **7 dias**: autentique uma vez com a
+senha e use as demais ações sem repeti-la. O comando só funciona no **privado**;
+em grupo o bot responde como comando desconhecido para não expor a
 administração. Opcionalmente, `ADMIN_PHONE` limita o uso a um único número.
 
 ```text
-/admin <senha> status                         # API, WhatsApp, assinantes, grupos e últimos envios
-/admin <senha> boletim [manha|tarde|noite]    # dispara o boletim agora (sem período = atual)
-/admin <senha> alertas                        # executa o job de alertas agora
-/admin <senha> grupos                         # lista grupos inscritos e locais
-/admin <senha> ping                           # teste rápido
-/admin <senha> ajuda                          # ações disponíveis
+/admin register <senha>                       # libera este número por 7 dias (aceita --<senha>)
+/admin status                                 # API, WhatsApp, assinantes, grupos e últimos envios
+/admin boletim [manha|tarde|noite]            # dispara o boletim agora (sem período = atual)
+/admin alertas                                # executa o job de alertas agora
+/admin grupos                                 # lista grupos inscritos e locais
+/admin ping                                   # teste rápido
+/admin logout                                 # encerra a sessão deste número
+/admin ajuda                                  # ações disponíveis
 ```
 
+- A senha só é necessária no `register`; depois a sessão fica vinculada ao
+  telefone (D1 no Workers, Postgres no Docker) e expira sozinha em 7 dias.
+- Quando a sessão vence, o bot envia um aviso no WhatsApp para o número (a
+  verificação roda a cada 5 min). Se o envio falhar, tenta de novo no ciclo
+  seguinte. O aviso não é repetido depois de entregue.
+- Trocar `ADMIN_PASSWORD` invalida as sessões abertas: o hash da senha é
+  comparado no banco a cada uso.
+- O formato antigo `/admin <senha> <ação>` continua aceito para uso avulso (não
+  cria sessão).
 - A senha nunca é registrada nos logs (o webhook redige `/admin` antes do log)
-  nem aparece nas respostas; ainda assim, use só no privado e apague a mensagem
-  depois.
+  nem aparece nas respostas; ainda assim, use só no privado.
 - Gere uma senha longa: `openssl rand -hex 16`. No Workers, configure como
   secret (`npx wrangler secret put ADMIN_PASSWORD`); no Docker, no `.env`.
 - `ADMIN_PASSWORD` vazio = administração desabilitada.
@@ -528,7 +540,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | `BOT_NAME` | `clima-zap` | Nome do bot na invocação textual: `@clima-zap previsao` |
 | `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Vazio = jobs desativados |
 | `WEBHOOK_AUTH_TOKEN` | *(vazio)* | Token do header `Authorization: Bearer <token>` (configure também no webhook da Evolution). **Obrigatório em produção**: sem ele o webhook responde 503 em vez de aceitar eventos forjados |
-| `ADMIN_PASSWORD` | *(vazio)* | Senha do `/admin` (só no privado). Vazio = administração desabilitada. No Workers: `wrangler secret put ADMIN_PASSWORD` |
+| `ADMIN_PASSWORD` | *(vazio)* | Senha do `/admin` (só no privado; usada no `register`, que libera o número por 7 dias). Vazio = administração desabilitada. No Workers: `wrangler secret put ADMIN_PASSWORD` |
 | `ADMIN_PHONE` | *(vazio)* | Opcional: número (só dígitos, com DDI) autorizado a usar `/admin`; vazio = qualquer privado que saiba a senha |
 | `CORS_ORIGINS` | *(vazio)* | Origens liberadas no CORS, separadas por vírgula (ex.: `https://clima-zap.vercel.app`). Vazio = nenhuma origem cross-origin; `*` é ignorado |
 | `DOCS_DIR` | *(vazio → `docs/` da raiz)* / `/docs` (Docker) | Diretório da documentação markdown |
@@ -598,11 +610,12 @@ Testes da suíte principal:
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
 | `tests/test_webhook.py` | 20 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
-| `tests/test_d1_store.py` | 18 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
-| `tests/test_admin_commands.py` | 16 | `/admin` (senha, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, ajuda e redação da senha nos logs |
-| `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
+| `tests/test_d1_store.py` | 25 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history, sessões administrativas e conversão FFI |
+| `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
+| `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |
+| `tests/test_main.py` | 13 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), verificação de sessão admin a cada 5min, envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
 | `tests/test_config.py` | 7 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros (inclui `ADMIN_PASSWORD` curta) |
-| `tests/test_schedule.py` | 7 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
+| `tests/test_schedule.py` | 10 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), cron de sessão admin, crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |

@@ -7,7 +7,8 @@
   06/14/20h. Cada expressão dispara só o seu job (as duas coincidem em 06h e
   14h) e o boletim dorme o mesmo jitter anti-spam 0–15min do caminho Docker —
   por isso o sorteio respeita o limite de 15min de wall time do Cron Trigger
-  (``app.core.schedule``). Em 20h BRT roda também o purge do histórico.
+  (``app.core.schedule``). Em 20h BRT roda também o purge do histórico. O cron
+  ``*/5 * * * *`` avisa quando uma sessão administrativa de 7 dias expira.
 
 Deploy (a partir de backend/): ``uv run pywrangler deploy`` — veja README.
 """
@@ -31,10 +32,12 @@ from app.core.schedule import (  # noqa: E402  pylint: disable=wrong-import-posi
     FORECAST_PERIOD_BY_HOUR,
     MAINTENANCE_HOUR,
     cron_dispatch,
+    is_admin_session_cron,
     jitter_delay_seconds,
 )
 from app.main import (  # noqa: E402  pylint: disable=wrong-import-position
     app,
+    process_expired_admin_sessions,
     process_scheduled_weather_alerts,
     send_period_forecast,
 )
@@ -65,18 +68,30 @@ class Default(_AsgiEntrypoint):
         worker_runtime.attach(worker_runtime.scheduled_env(self, env))
         cron = (controller.cron or "").strip()
         hour = worker_runtime.brt_hour(controller.scheduledTime)
-        logger.warning("Cron Trigger %s → %02dh BRT", cron, hour)
-
         alerts_due, bulletins_due = cron_dispatch(cron)
+        if alerts_due or bulletins_due:
+            logger.warning("Cron Trigger %s → %02dh BRT", cron, hour)
+
+        if is_admin_session_cron(cron):
+            await self._notify_expired_admin_sessions()
+
         if alerts_due and hour in ALERT_SCHEDULE_HOURS:
             await self._send_alerts(hour)
 
-        if hour == MAINTENANCE_HOUR:
+        if bulletins_due and hour == MAINTENANCE_HOUR:
             await self._prune_history()
 
         period = FORECAST_PERIOD_BY_HOUR.get(hour) if bulletins_due else None
         if period is not None:
             await self._send_bulletin(period)
+
+    @staticmethod
+    async def _notify_expired_admin_sessions() -> None:
+        """Avisa no WhatsApp as sessões administrativas que venceram."""
+        try:
+            await process_expired_admin_sessions()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Erro no aviso de sessão administrativa expirada")
 
     @staticmethod
     async def _prune_history() -> None:
