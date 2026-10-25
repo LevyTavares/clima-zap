@@ -6,6 +6,7 @@ request), e os avisos ``production_warnings`` para defaults inseguros.
 """
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.core.config import parse_cors_origins, settings
 from app.main import app
@@ -60,6 +61,7 @@ def test_production_warnings_silencia_fora_de_producao(monkeypatch):
     monkeypatch.setattr(settings, "webhook_auth_token", "")
     monkeypatch.setattr(settings, "evolution_api_key", "changeme")
     monkeypatch.setattr(settings, "evolution_api_url", "http://localhost:8080")
+    monkeypatch.setattr(settings, "admin_password", SecretStr("curta"))
 
     assert not settings.production_warnings()
 
@@ -69,6 +71,7 @@ def test_production_warnings_lista_defaults_inseguros(monkeypatch):
     monkeypatch.setattr(settings, "webhook_auth_token", "")
     monkeypatch.setattr(settings, "evolution_api_key", "changeme")
     monkeypatch.setattr(settings, "evolution_api_url", "http://localhost:8080")
+    monkeypatch.setattr(settings, "admin_password", SecretStr(""))
 
     warnings = settings.production_warnings()
 
@@ -83,5 +86,21 @@ def test_production_warnings_vazio_com_config_segura(monkeypatch):
     monkeypatch.setattr(settings, "webhook_auth_token", "s3cret")
     monkeypatch.setattr(settings, "evolution_api_key", "chave-real")
     monkeypatch.setattr(settings, "evolution_api_url", "https://evo.example.com")
+    monkeypatch.setattr(
+        settings, "admin_password", SecretStr("senha-segura-de-teste-123")
+    )
 
     assert not settings.production_warnings()
+
+
+def test_production_warnings_admin_password_curta(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "webhook_auth_token", "s3cret")
+    monkeypatch.setattr(settings, "evolution_api_key", "chave-real")
+    monkeypatch.setattr(settings, "evolution_api_url", "https://evo.example.com")
+    monkeypatch.setattr(settings, "admin_password", SecretStr("curta"))
+
+    warnings = settings.production_warnings()
+
+    assert len(warnings) == 1
+    assert "ADMIN_PASSWORD" in warnings[0]

@@ -601,7 +601,7 @@ Testes da suíte principal:
 | `tests/test_d1_store.py` | 18 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
 | `tests/test_admin_commands.py` | 16 | `/admin` (senha, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, ajuda e redação da senha nos logs |
 | `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
-| `tests/test_config.py` | 6 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros |
+| `tests/test_config.py` | 7 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros (inclui `ADMIN_PASSWORD` curta) |
 | `tests/test_schedule.py` | 7 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
