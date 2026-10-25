@@ -78,8 +78,10 @@ def test_scheduled_weather_alerts_process(monkeypatch, caplog):
 
     monkeypatch.setattr("app.main.fetch_cariri_weather", mock_fetch_cariri_weather)
 
-    asyncio.run(process_scheduled_weather_alerts())
+    summary = asyncio.run(process_scheduled_weather_alerts())
 
+    assert summary["locations"] >= 1
+    assert summary["alerts"] >= 1
     assert "Alerta climático programado" in caplog.text
 
 
@@ -132,7 +134,9 @@ def test_send_period_forecast_skips_when_no_target(monkeypatch, caplog):
     monkeypatch.setattr(main_module, "list_active_groups", no_groups)
     monkeypatch.setattr(main_module, "build_period_forecast", boom)
 
-    asyncio.run(send_period_forecast("morning"))
+    summary = asyncio.run(send_period_forecast("morning"))
+
+    assert summary == {"targets": 0, "sent": 0, "failed": 0}
     assert "pulado" in caplog.text
 
 
@@ -156,7 +160,9 @@ def test_send_period_forecast_sends(monkeypatch):
     monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
     monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
 
-    asyncio.run(send_period_forecast("afternoon"))
+    summary = asyncio.run(send_period_forecast("afternoon"))
+
+    assert summary == {"targets": 1, "sent": 1, "failed": 0}
     assert sent == {"number": "1203630@g.us", "message": "boletim-afternoon"}
 
 

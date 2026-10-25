@@ -58,3 +58,28 @@ async def prune_alert_logs(days: int = ALERT_LOG_RETENTION_DAYS) -> int:
         )
         await session.commit()
         return int(result.rowcount or 0)
+
+
+async def recent_alert_dispatches(limit: int = 5) -> list[dict]:
+    """Últimos envios registrados (mais novos primeiro), para o /admin status."""
+    safe_limit = max(1, min(int(limit), 50))
+    if worker_runtime.on_workers():
+        return await d1.recent_alert_dispatches(safe_limit)
+
+    from app.db.orm import AlertLog, select  # pylint: disable=import-outside-toplevel
+
+    async with db_session.SessionLocal() as session:
+        result = await session.execute(
+            select(AlertLog)
+            .order_by(AlertLog.sent_at.desc(), AlertLog.id.desc())
+            .limit(safe_limit)
+        )
+        return [
+            {
+                "alert_type": row.alert_type,
+                "recipient": row.recipient,
+                "delivery_status": row.delivery_status,
+                "sent_at": row.sent_at,
+            }
+            for row in result.scalars()
+        ]

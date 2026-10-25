@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.geocode import geocode_city
 from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city, parse_coordinates
 from app.schemas.webhook import WebhookPayload
+from app.services.admin_commands import handle_admin_command
 from app.services.bot_menu import get_help_message
 from app.services.command_parser import parse_invocation
 from app.services.forecast import build_current_forecast
@@ -223,6 +224,14 @@ async def route_command(command: str, args: str, recipient: str) -> str:
     if command in FORECAST_ALIASES:
         return await handle_forecast_command(recipient)
 
+    if command == "admin":
+        # Administração só no privado: em grupo a senha ficaria exposta e o
+        # bot não deve confirmar que o comando existe.
+        if recipient.endswith("@g.us"):
+            logger.warning("Comando /admin recusado em grupo: %s", recipient)
+            return NOT_FOUND_TEXT
+        return await handle_admin_command(args, recipient)
+
     return NOT_FOUND_TEXT
 
 def normalize_event(event: str) -> str:
@@ -262,9 +271,13 @@ async def process_event_background(payload: WebhookPayload):
         )
         return
 
-    logger.info("Mensagem de %s: %s", sender, message_text)
     recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
+    if invocation is not None and invocation.command == "admin":
+        # Nunca registre a senha em log (o texto completo iria para o stdout).
+        logger.info("Mensagem de %s: /admin (credenciais omitidas)", sender)
+    else:
+        logger.info("Mensagem de %s: %s", sender, message_text)
     if invocation is None:
         response = await handle_non_command(recipient)
         if response is None:

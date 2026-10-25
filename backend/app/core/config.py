@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Token opcional exigido no header `Authorization: Bearer <token>` do webhook.
     # Vazio = sem verificação. Configure também um header custom no webhook da Evolution.
     webhook_auth_token: str = ""
+    # Comando /admin (só no privado): vazio = administração desabilitada.
+    # Use uma senha longa e aleatória (`openssl rand -hex 16`).
+    admin_password: SecretStr = SecretStr("")
+    # Opcional: número do WhatsApp (só dígitos, com DDI) autorizado a usar
+    # /admin. Vazio = qualquer privado que saiba a senha.
+    admin_phone: str = ""
     docs_dir: str = ""
     database_url: SecretStr = SecretStr("sqlite+aiosqlite:///./clima_zap.db")
     database_ssl: bool = False
@@ -76,6 +82,17 @@ class Settings(BaseSettings):
             warnings.append(
                 f"EVOLUTION_API_URL sem HTTPS ({self.evolution_api_url}): a API "
                 "key trafega nesse host — exponha a Evolution por HTTPS público"
+            )
+        admin_password = self.admin_password.get_secret_value()
+        if admin_password and admin_password.strip().lower() in INSECURE_SECRETS:
+            warnings.append(
+                "ADMIN_PASSWORD com valor default/placeholder: troque antes de "
+                "usar (ex.: `openssl rand -hex 16`)"
+            )
+        if admin_password and len(admin_password) < 12:
+            warnings.append(
+                "ADMIN_PASSWORD curta: use pelo menos 12 caracteres "
+                "(`openssl rand -hex 16`)"
             )
         return warnings
 

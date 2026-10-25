@@ -355,6 +355,7 @@ npx wrangler secret put EVOLUTION_API_KEY
 npx wrangler secret put EVOLUTION_INSTANCE_NAME
 npx wrangler secret put FORECAST_GROUP_JID   # opcional: boletins 06/14/20h
 npx wrangler secret put WEBHOOK_AUTH_TOKEN   # obrigatório em produção (503 sem ele)
+npx wrangler secret put ADMIN_PASSWORD       # opcional: habilita /admin (senha longa)
 npx wrangler secret put TARGET_PHONE_NUMBER  # opcional: menção nativa @número
 
 # 5. Deploy
@@ -439,6 +440,29 @@ Os comandos valem em **duas formas de invocação**:
 
 > Texto sem `/` e sem menção **não** é comando: `ajuda` puro é ignorado.
 
+### Administração (`/admin`)
+
+Comando protegido por senha (`ADMIN_PASSWORD`) e disponível **apenas no
+privado**; em grupo o bot responde como comando desconhecido para não expor a
+administração. Opcionalmente, `ADMIN_PHONE` limita o uso a um único número.
+
+```text
+/admin <senha> status                         # API, WhatsApp, assinantes, grupos e últimos envios
+/admin <senha> boletim [manha|tarde|noite]    # dispara o boletim agora (sem período = atual)
+/admin <senha> alertas                        # executa o job de alertas agora
+/admin <senha> grupos                         # lista grupos inscritos e locais
+/admin <senha> ping                           # teste rápido
+/admin <senha> ajuda                          # ações disponíveis
+```
+
+- A senha nunca é registrada nos logs (o webhook redige `/admin` antes do log)
+  nem aparece nas respostas; ainda assim, use só no privado e apague a mensagem
+  depois.
+- Gere uma senha longa: `openssl rand -hex 16`. No Workers, configure como
+  secret (`npx wrangler secret put ADMIN_PASSWORD`); no Docker, no `.env`.
+- `ADMIN_PASSWORD` vazio = administração desabilitada.
+- O `/admin` **não** aparece no menu público de `/ajuda`.
+
 ### Payload de exemplo (webhook)
 
 ```json
@@ -504,6 +528,8 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 | `BOT_NAME` | `clima-zap` | Nome do bot na invocação textual: `@clima-zap previsao` |
 | `FORECAST_GROUP_JID` | *(vazio)* | Grupo alvo do boletim 3×/dia (`120363...@g.us`). Vazio = jobs desativados |
 | `WEBHOOK_AUTH_TOKEN` | *(vazio)* | Token do header `Authorization: Bearer <token>` (configure também no webhook da Evolution). **Obrigatório em produção**: sem ele o webhook responde 503 em vez de aceitar eventos forjados |
+| `ADMIN_PASSWORD` | *(vazio)* | Senha do `/admin` (só no privado). Vazio = administração desabilitada. No Workers: `wrangler secret put ADMIN_PASSWORD` |
+| `ADMIN_PHONE` | *(vazio)* | Opcional: número (só dígitos, com DDI) autorizado a usar `/admin`; vazio = qualquer privado que saiba a senha |
 | `CORS_ORIGINS` | *(vazio)* | Origens liberadas no CORS, separadas por vírgula (ex.: `https://clima-zap.vercel.app`). Vazio = nenhuma origem cross-origin; `*` é ignorado |
 | `DOCS_DIR` | *(vazio → `docs/` da raiz)* / `/docs` (Docker) | Diretório da documentação markdown |
 | `POSTGRES_DATABASE` | `evolution` | Banco do PostgreSQL (Evolution) |
@@ -572,7 +598,8 @@ Testes da suíte principal:
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
 | `tests/test_webhook.py` | 20 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
-| `tests/test_d1_store.py` | 16 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
+| `tests/test_d1_store.py` | 18 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history e conversão FFI |
+| `tests/test_admin_commands.py` | 15 | `/admin` (senha, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, ajuda e redação da senha nos logs |
 | `tests/test_main.py` | 11 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
 | `tests/test_config.py` | 6 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros |
 | `tests/test_schedule.py` | 7 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |

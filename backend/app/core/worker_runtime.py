@@ -51,6 +51,8 @@ SYNCED_KEYS = (
     "bot_name",
     "forecast_group_jid",
     "webhook_auth_token",
+    "admin_password",
+    "admin_phone",
     "docs_dir",
     "database_url",
     "database_ssl",
@@ -84,8 +86,8 @@ def attach(env: object) -> None:
         if value is None:
             continue
         text = str(value)
-        if key == "database_url":
-            settings.database_url = SecretStr(text)
+        if key in ("database_url", "admin_password"):
+            setattr(settings, key, SecretStr(text))
         elif key == "database_ssl":
             settings.database_ssl = text.strip().lower() in ("1", "true", "yes")
         elif key == "port":

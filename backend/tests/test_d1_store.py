@@ -154,6 +154,22 @@ class FakeD1:
             changes = len(self.alert_logs) - len(mantidos)
             self.alert_logs = mantidos
 
+        elif sql.startswith(
+            "SELECT alert_type, recipient, delivery_status, sent_at FROM alert_logs"
+        ):
+            ordered = sorted(
+                self.alert_logs, key=lambda log: log["id"], reverse=True
+            )
+            rows = [
+                {
+                    "alert_type": log["alert_type"],
+                    "recipient": log["recipient"],
+                    "delivery_status": log["delivery_status"],
+                    "sent_at": log["sent_at"],
+                }
+                for log in ordered[: params[0]]
+            ]
+
         elif sql.startswith("INSERT OR IGNORE INTO seen_messages"):
             if params[0] in self.seen:
                 changes = 0
@@ -203,6 +219,19 @@ def fake_workers_env_fixture():
 def test_attach_syncs_uppercase_vars_and_exposes_d1(workers_env):
     assert worker_runtime.on_workers() is True
     assert worker_runtime.d1() is workers_env.DB
+
+
+def test_attach_syncs_admin_password_as_secret(monkeypatch):
+    from pydantic import SecretStr  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(settings, "admin_password", SecretStr(""))
+    worker_runtime.reset_for_tests()
+    env = SimpleNamespace(ADMIN_PASSWORD="senha-sincronizada-123")
+
+    worker_runtime.attach(env)
+
+    assert settings.admin_password.get_secret_value() == "senha-sincronizada-123"
+    worker_runtime.reset_for_tests()
 
 
 def test_attach_noop_without_env():
@@ -382,6 +411,20 @@ def test_prune_alert_logs_via_d1(workers_env):
 
     assert asyncio.run(flow()) == 1
     assert [log["recipient"] for log in workers_env.DB.alert_logs] == ["+5599"]
+
+
+def test_recent_alert_dispatches_via_d1(workers_env):  # pylint: disable=unused-argument
+    async def flow():
+        await alert_history.record_alert_dispatch("forecast_morning", "+5588", "sent")
+        await alert_history.record_alert_dispatch("weather_alert", "+5599", "failed")
+        return await alert_history.recent_alert_dispatches(1)
+
+    rows = asyncio.run(flow())
+
+    assert len(rows) == 1
+    assert rows[0]["alert_type"] == "weather_alert"
+    assert rows[0]["recipient"] == "+5599"
+    assert rows[0]["delivery_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

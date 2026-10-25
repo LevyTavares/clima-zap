@@ -54,8 +54,13 @@ if not worker_runtime.is_workers_runtime():
     scheduler = AsyncIOScheduler(timezone="America/Fortaleza")
 
 
-async def process_scheduled_weather_alerts() -> None:
-    """Gera e envia alertas por região: sempre a padrão + cada cidade de assinantes."""
+async def process_scheduled_weather_alerts() -> dict[str, int]:
+    """Gera e envia alertas por região: sempre a padrão + cada cidade de assinantes.
+
+    Retorna um resumo (``locations`` avaliados, ``alerts`` gerados) para o
+    comando administrativo; o agendador ignora o retorno.
+    """
+    summary = {"locations": 0, "alerts": 0}
     try:
         groups = await group_active_subscribers_by_city()
     except storage_errors() as error:
@@ -64,6 +69,7 @@ async def process_scheduled_weather_alerts() -> None:
 
     # Região padrão ('') é sempre avaliada, mesmo sem assinantes, para logar alertas.
     for city, subscribers in {"": [], **groups}.items():
+        summary["locations"] += 1
         location = resolve_group_location(city, subscribers)
         weather_info = await fetch_cariri_weather(location)
         current = weather_info.current.model_dump()
@@ -74,8 +80,10 @@ async def process_scheduled_weather_alerts() -> None:
         )
 
         for alert in alerts:
+            summary["alerts"] += 1
             logger.warning("Alerta climático programado: %s", alert)
         await dispatch_weather_alerts(alerts, subscribers=subscribers)
+    return summary
 
 
 async def _bulletin_targets() -> list[tuple[str, LocationData | None]]:
@@ -114,21 +122,25 @@ async def _record_forecast_dispatch(
         )
 
 
-async def send_period_forecast(period: Period) -> None:
+async def send_period_forecast(period: Period) -> dict[str, int]:
     """Envia o boletim do período ao grupo principal e aos grupos inscritos.
 
     Grupos com o mesmo local compartilham a mesma mensagem (um fetch só);
     grupos sem local cadastrado recebem o boletim da região padrão.
+
+    Retorna ``{"targets", "sent", "failed"}`` para o comando administrativo;
+    o agendador ignora o retorno.
     """
     log = logging.getLogger("uvicorn.error")
     targets = await _bulletin_targets()
+    summary = {"targets": len(targets), "sent": 0, "failed": 0}
     if not targets:
         log.warning(
             "FORECAST_GROUP_JID vazio e nenhum grupo inscrito — "
             "forecast %s pulado",
             period,
         )
-        return
+        return summary
 
     messages: dict[tuple[float, float] | None, str] = {}
     for recipient, location in targets:
@@ -144,6 +156,7 @@ async def send_period_forecast(period: Period) -> None:
                 log.error(
                     "Erro ao montar forecast %s para %s: %s", period, recipient, e
                 )
+                summary["failed"] += 1
                 continue
 
         try:
@@ -151,13 +164,16 @@ async def send_period_forecast(period: Period) -> None:
             log.warning("Forecast %s enviado para %s: %s", period, recipient, result)
         except EvolutionError as e:
             log.error("Erro ao enviar forecast %s para %s: %s", period, recipient, e)
+            summary["failed"] += 1
             await _record_forecast_dispatch(period, recipient, "failed")
             continue
 
+        summary["sent"] += 1
         delivery_status = (
             result.get("status", "sent") if isinstance(result, dict) else "sent"
         )
         await _record_forecast_dispatch(period, recipient, str(delivery_status))
+    return summary
 
 
 def register_maintenance_job() -> None:

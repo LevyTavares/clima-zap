@@ -197,6 +197,15 @@ async def prune_alert_logs(days: int) -> int:
     return _changes(result)
 
 
+async def recent_alert_dispatches(limit: int = 5) -> list[dict]:
+    """Últimos envios de alertas/boletins (mais novos primeiro)."""
+    result = await _db().prepare(
+        "SELECT alert_type, recipient, delivery_status, sent_at"
+        " FROM alert_logs ORDER BY id DESC LIMIT ?"
+    ).bind(max(1, min(int(limit), 50))).all()
+    return _rows(result)
+
+
 async def is_duplicate_message(message_id: str) -> bool:
     """Marca message_id como visto; True se já havia sido visto (duplicado)."""
     database = _db()
