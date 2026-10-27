@@ -4,7 +4,8 @@ from functools import partial
 
 import httpx
 from evolution_api import EvolutionError
-from fastapi import APIRouter, Header, status, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
+
 from app.core import worker_runtime
 from app.core.config import settings
 from app.core.geocode import geocode_city
@@ -20,8 +21,8 @@ from app.schemas.webhook import WebhookPayload
 from app.services.admin_commands import handle_admin_command
 from app.services.bot_menu import get_help_message
 from app.services.command_parser import parse_invocation
-from app.services.forecast import build_current_forecast
 from app.services.evolution_client import send_whatsapp_message
+from app.services.forecast import build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,

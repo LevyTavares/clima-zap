@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.api import webhook
+import app.api.webhook as webhook
 from app.api.webhook import handle_non_command, recipient_key, route_command
 from app.core.config import settings
 from app.main import app
