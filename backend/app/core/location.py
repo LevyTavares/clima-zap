@@ -28,6 +28,14 @@ CRAJUBAR_LOCATIONS: Dict[str, LocationData] = {
 
 DEFAULT_LOCATION = CRAJUBAR_LOCATIONS["barbalha"]
 
+# Escolha de cidade por número (região Crajubar) — usada quando o comando
+# vem sem argumentos, exibindo a lista numerada.
+NUMERIC_CITY_MAP: dict[str, str] = {
+    "1": "Barbalha",
+    "2": "Juazeiro do Norte",
+    "3": "Crato",
+}
+
 
 def _normalize_string(text: str) -> str:
     """Remove acentos e converte para minúsculas para busca flexível."""
@@ -43,6 +51,10 @@ def match_city(city_query: str | None) -> LocationData | None:
     """
     if not city_query:
         return None
+
+    stripped = city_query.strip()
+    if stripped in NUMERIC_CITY_MAP:
+        city_query = NUMERIC_CITY_MAP[stripped]
 
     normalized_query = _normalize_string(city_query)
 

@@ -56,7 +56,7 @@ def test_help_command_returns_bot_menu():
     assert "*/ajuda*" in reply
     assert "*/cidade <nome>*" in reply
     assert "*/configuracao" in reply
-    assert "*/inscrever*" in reply
+    assert "*/inscrever" in reply
 
 
 def test_unknown_command_suggests_menu():
@@ -164,7 +164,7 @@ def test_unknown_local_lists_options_when_geocode_misses(monkeypatch):
 
 def test_subscribe_and_leave_cycle(test_database):
     first = run_command("/inscrever")
-    assert "Inscrição realizada" in first
+    assert "Inscrição efetuada" in first
 
     again = run_command("/inscrever")
     assert "já está inscrito" in again

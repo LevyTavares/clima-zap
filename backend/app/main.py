@@ -16,6 +16,7 @@ from app.core.cors import SettingsCORSMiddleware
 from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city
 from app.core.schedule import (
     ADMIN_SESSION_CHECK_MINUTES,
+    ALERT_JITTER_SECONDS,
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_JOBS,
@@ -36,6 +37,7 @@ from app.services.forecast import Period, build_period_forecast
 from app.services.persistence import (
     group_active_subscribers_by_city,
     list_active_groups,
+    list_active_subscribers,
     resolve_group_location,
     subscriber_location,
 )
@@ -134,26 +136,33 @@ async def process_expired_admin_sessions() -> dict[str, int]:
 
 
 async def _bulletin_targets() -> list[tuple[str, LocationData | None]]:
-    """Destinos do boletim: grupo principal + grupos inscritos (sem duplicar).
+    """Destinos do boletim: grupo principal + assinantes com boletins (sem duplicar).
 
-    O formato ``(JID, local)`` carrega o local junto porque cada grupo recebe o
-    boletim da sua própria cidade; ``local`` None = região padrão da aplicação.
+    O formato ``(JID, local)`` carrega o local junto porque cada destinatário
+    recebe o boletim da sua própria cidade; ``local`` None = região padrão da
+    aplicação.
     """
     log = logging.getLogger("uvicorn.error")
     group_jid = settings.forecast_group_jid
     try:
-        groups = await list_active_groups()
+        subscribers = await list_active_subscribers()
     except storage_errors() as error:
-        log.error("Erro ao buscar grupos inscritos: %s", error)
-        groups = []
+        log.error("Erro ao buscar assinantes ativos: %s", error)
+        subscribers = []
 
-    by_phone = {subscriber.phone: subscriber for subscriber in groups}
+    by_phone = {subscriber.phone: subscriber for subscriber in subscribers}
     targets: list[tuple[str, LocationData | None]] = []
+    seen: set[str] = set()
     if group_jid:
         targets.append((group_jid, subscriber_location(by_phone.get(group_jid))))
-    for subscriber in groups:
-        if subscriber.phone != group_jid:
-            targets.append((subscriber.phone, subscriber_location(subscriber)))
+        seen.add(group_jid)
+    for subscriber in subscribers:
+        if subscriber.phone in seen:
+            continue
+        if not getattr(subscriber, "receive_bulletins", True):
+            continue
+        targets.append((subscriber.phone, subscriber_location(subscriber)))
+        seen.add(subscriber.phone)
     return targets
 
 
@@ -298,6 +307,7 @@ async def lifespan(_: FastAPI):
         trigger="cron",
         hour=",".join(map(str, ALERT_SCHEDULE_HOURS)),
         minute=0,
+        jitter=ALERT_JITTER_SECONDS,
         id="scheduled_weather_alerts",
         replace_existing=True,
     )

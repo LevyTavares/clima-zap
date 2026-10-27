@@ -20,3 +20,5 @@ class Subscriber:
     latitude: float | None = None
     longitude: float | None = None
     is_active: bool = False
+    receive_alerts: bool = False
+    receive_bulletins: bool = False

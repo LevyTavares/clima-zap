@@ -145,7 +145,7 @@ def test_send_period_forecast_skips_when_no_target(monkeypatch, caplog):
     async def boom(*args, **kwargs):
         raise AssertionError("should not fetch")
 
-    monkeypatch.setattr(main_module, "list_active_groups", no_groups)
+    monkeypatch.setattr(main_module, "list_active_subscribers", no_groups)
     monkeypatch.setattr(main_module, "build_period_forecast", boom)
 
     summary = asyncio.run(send_period_forecast("morning"))
@@ -170,7 +170,7 @@ def test_send_period_forecast_sends(monkeypatch):
         sent["message"] = message
         return {"status": "sent"}
 
-    monkeypatch.setattr(main_module, "list_active_groups", no_groups)
+    monkeypatch.setattr(main_module, "list_active_subscribers", no_groups)
     monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
     monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
 

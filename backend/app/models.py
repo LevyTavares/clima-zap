@@ -22,6 +22,15 @@ class Subscriber(Base):
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # Inscrição modular: alertas climáticos (weather alerts) e boletins
+    # periódicos (forecasts) são independentes — o usuário escolhe um,
+    # outro ou ambos (ou nenhum, via /sair).
+    receive_alerts: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    receive_bulletins: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     alert_logs: Mapped[list["AlertLog"]] = relationship(back_populates="subscriber")
 
 

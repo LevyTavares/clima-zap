@@ -80,43 +80,141 @@ async def get_subscriber_location(phone: str) -> LocationData | None:
     return subscriber_location(subscriber)
 
 
-async def subscribe_recipient(phone: str, name: str | None = None) -> dict:
-    """Inscreve ou reativa um destinatário. Retorna {status, message}."""
+ALERTS_KIND = messages.ALERTS_KIND
+BULLETINS_KIND = messages.BULLETINS_KIND
+ALL_KINDS = messages.ALL_KINDS
+
+_ALERT_ALIASES = {"alertas", "alerts", "alerta", "alert", "clima", "weather"}
+_BULLETIN_ALIASES = {
+    "boletins",
+    "boletim",
+    "bulletins",
+    "bulletin",
+    "forecast",
+    "previsao",
+    "previsão",
+}
+_ALL_ALIASES = {"todos", "ambos", "all", "tudo", "both", "total"}
+_NONE_ALIASES = {"nenhum", "none", "nada"}
+
+
+def normalize_subscription_kinds(value) -> set[str]:
+    """Normaliza a entrada do usuário em um conjunto de kinds.
+
+    ``None`` ou vazio → ambos (alertas + boletins). Aceita string, lista ou
+    conjunto; tokens separados por espaço ou vírgula.
+    """
+    if value is None:
+        return set(ALL_KINDS)
+    if isinstance(value, (list, tuple, set)):
+        tokens = list(value)
+    else:
+        tokens = str(value).replace(",", " ").split()
+    if not tokens:
+        return set(ALL_KINDS)
+
+    kinds: set[str] = set()
+    explicit_none = False
+    for raw in tokens:
+        token = str(raw).strip().lower()
+        if not token:
+            continue
+        if token in _ALL_ALIASES:
+            kinds |= ALL_KINDS
+        elif token in _ALERT_ALIASES:
+            kinds.add(ALERTS_KIND)
+        elif token in _BULLETIN_ALIASES:
+            kinds.add(BULLETINS_KIND)
+        elif token in _NONE_ALIASES:
+            explicit_none = True
+            kinds.clear()
+    if explicit_none:
+        return set()
+    if not kinds:
+        return set(ALL_KINDS)
+    return kinds
+
+
+async def subscribe_recipient(
+    phone: str, name: str | None = None, kinds=None
+) -> dict:
+    """Inscreve (ou reativa) um destinatário nos kinds informados.
+
+    ``kinds`` pode ser ``None`` (ambos), string ou iterável de tokens. Retorna
+    ``{status, message}``.
+    """
+    wanted = normalize_subscription_kinds(kinds)
     if worker_runtime.on_workers():
-        return await d1.subscribe_recipient(phone, name)
+        return await d1.subscribe_recipient(phone, name, wanted)
     async with db_session.SessionLocal() as session:
         subscriber = await _find_subscriber(session, phone)
 
-        if subscriber and subscriber.is_active:
-            return messages.already_subscribed(phone)
+        before_alerts = bool(subscriber.receive_alerts) if subscriber else False
+        before_bulletins = (
+            bool(subscriber.receive_bulletins) if subscriber else False
+        )
 
-        if subscriber:
-            subscriber.is_active = True
-            if name is not None:
-                subscriber.name = name.strip() or None
-        else:
-            session.add(
-                _orm().Subscriber(
-                    phone=phone, name=name.strip() if name else None
-                )
+        already = subscriber is not None and subscriber.is_active
+        if ALERTS_KIND in wanted and not before_alerts:
+            already = False
+        if BULLETINS_KIND in wanted and not before_bulletins:
+            already = False
+        if not wanted:
+            already = False
+
+        if already:
+            return messages.already_subscribed(phone, wanted)
+
+        if subscriber is None:
+            subscriber = _orm().Subscriber(
+                phone=phone, name=name.strip() if name else None
             )
+            session.add(subscriber)
+        else:
+            if name is not None:
+                subscriber.name = name.strip() or subscriber.name
+
+        if ALERTS_KIND in wanted:
+            subscriber.receive_alerts = True
+        if BULLETINS_KIND in wanted:
+            subscriber.receive_bulletins = True
+        subscriber.is_active = (
+            subscriber.receive_alerts or subscriber.receive_bulletins
+        )
         await session.commit()
-        return messages.subscribed(phone)
+        return messages.subscribed(phone, wanted)
 
 
-async def unsubscribe_recipient(phone: str) -> dict:
-    """Cancela a inscrição (soft delete). Retorna {status, message}."""
+async def unsubscribe_recipient(phone: str, kinds=None) -> dict:
+    """Cancela a inscrição nos kinds informados (padrão: todos)."""
+    wanted = normalize_subscription_kinds(kinds)
+    if not wanted:
+        wanted = set(ALL_KINDS)
     if worker_runtime.on_workers():
-        return await d1.unsubscribe_recipient(phone)
+        return await d1.unsubscribe_recipient(phone, wanted)
     async with db_session.SessionLocal() as session:
         subscriber = await _find_subscriber(session, phone)
 
         if subscriber is None or not subscriber.is_active:
             return messages.subscription_not_found(phone)
 
-        subscriber.is_active = False
+        has_any = False
+        if ALERTS_KIND in wanted and subscriber.receive_alerts:
+            has_any = True
+        if BULLETINS_KIND in wanted and subscriber.receive_bulletins:
+            has_any = True
+        if not has_any:
+            return messages.subscription_not_found(phone)
+
+        if ALERTS_KIND in wanted:
+            subscriber.receive_alerts = False
+        if BULLETINS_KIND in wanted:
+            subscriber.receive_bulletins = False
+        subscriber.is_active = (
+            subscriber.receive_alerts or subscriber.receive_bulletins
+        )
         await session.commit()
-        return messages.unsubscribed(phone)
+        return messages.unsubscribed(phone, wanted)
 
 
 async def set_subscriber_location(
@@ -176,18 +274,26 @@ async def list_active_subscribers() -> list[Subscriber]:
 
 
 async def list_active_groups() -> list[Subscriber]:
-    """Assinantes ativos cujo destino é grupo (JID terminando em ``@g.us``)."""
+    """Assinantes ativos cujo destino é grupo (JID terminando em ``@g.us``)
+    e que estão inscritos em boletins periódicos."""
     return [
         subscriber
         for subscriber in await list_active_subscribers()
         if subscriber.phone.endswith("@g.us")
+        and getattr(subscriber, "receive_bulletins", True)
     ]
 
 
 async def group_active_subscribers_by_city() -> dict[str, list[Subscriber]]:
-    """Agrupa assinantes ativos por cidade ('' = região padrão)."""
+    """Agrupa assinantes ativos por cidade ('' = região padrão).
+
+    Apenas quem está inscrito em alertas climáticos entra no dispatch de
+    alertas (inscrição modular).
+    """
     groups: dict[str, list[Subscriber]] = {}
     for subscriber in await list_active_subscribers():
+        if not getattr(subscriber, "receive_alerts", True):
+            continue
         groups.setdefault(subscriber.city or "", []).append(subscriber)
     return groups
 

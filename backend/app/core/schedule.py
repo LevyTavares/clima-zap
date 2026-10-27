@@ -16,6 +16,9 @@ from app.services.forecast import Period
 # Alertas: 06/08/12/14/16/18h BRT (America/Fortaleza = UTC-3, sem DST).
 ALERT_SCHEDULE_HOURS = [6, 8, 12, 14, 16, 18]
 
+# Alertas climáticos: jitter 0–5min anti-spam (evita rajada simultânea).
+ALERT_JITTER_SECONDS = 300  # 5min
+
 # Boletim periódico: manhã / tarde / noite — jitter 0–15min anti-spam.
 FORECAST_PERIOD_JOBS: list[tuple[str, int, Period]] = [
     ("forecast_morning", 6, "morning"),

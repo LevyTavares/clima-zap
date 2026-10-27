@@ -106,8 +106,8 @@ def test_period_forecast_fans_out_to_subscribed_groups(test_database, monkeypatc
 
     async def create_subscribers():
         async with test_database() as session:
-            session.add(Subscriber(phone="1203630@g.us", city="Crato", is_active=True))
-            session.add(Subscriber(phone="1203631@g.us", city="Crato", is_active=True))
+            session.add(Subscriber(phone="1203630@g.us", city="Crato", is_active=True, receive_bulletins=True))
+            session.add(Subscriber(phone="1203631@g.us", city="Crato", is_active=True, receive_bulletins=True))
             session.add(
                 Subscriber(
                     phone="1203632@g.us",
@@ -115,10 +115,11 @@ def test_period_forecast_fans_out_to_subscribed_groups(test_database, monkeypatc
                     latitude=-3.73,
                     longitude=-38.53,
                     is_active=True,
+                    receive_bulletins=True,
                 )
             )
             # PV inscrito não recebe boletim (só os alertas climáticos)
-            session.add(Subscriber(phone="+15551234567", city="Crato", is_active=True))
+            session.add(Subscriber(phone="+15551234567", city="Crato", is_active=True, receive_alerts=True))
             await session.commit()
 
     asyncio.run(create_subscribers())
@@ -155,7 +156,7 @@ def test_period_forecast_without_main_group_uses_subscribed_groups(
 
     async def create_subscriber():
         async with test_database() as session:
-            session.add(Subscriber(phone="1203639@g.us", city="Crato", is_active=True))
+            session.add(Subscriber(phone="1203639@g.us", city="Crato", is_active=True, receive_bulletins=True))
             await session.commit()
 
     asyncio.run(create_subscriber())
@@ -180,7 +181,7 @@ def test_period_forecast_without_main_group_uses_subscribed_groups(
 def test_weather_alert_is_sent_to_active_subscriber(test_database, monkeypatch):
     async def create_subscriber():
         async with test_database() as session:
-            subscriber = Subscriber(phone="+15559876543", is_active=True)
+            subscriber = Subscriber(phone="+15559876543", is_active=True, receive_alerts=True)
             session.add(subscriber)
             await session.commit()
 

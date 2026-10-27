@@ -27,6 +27,7 @@ httpx_client.ACCEPT_ENCODING = "identity"
 
 from app.core import worker_runtime  # noqa: E402  pylint: disable=wrong-import-position
 from app.core.schedule import (  # noqa: E402  pylint: disable=wrong-import-position
+    ALERT_JITTER_SECONDS,
     ALERT_SCHEDULE_HOURS,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_BY_HOUR,
@@ -104,7 +105,13 @@ class Default(_AsgiEntrypoint):
 
     @staticmethod
     async def _send_alerts(hour: int) -> None:
-        """Alertas agendados — sem jitter, igual ao caminho Docker."""
+        """Alertas agendados — com jitter anti-spam 0-5min."""
+        delay = jitter_delay_seconds(ALERT_JITTER_SECONDS)
+        if delay:
+            logger.warning(
+                "Alertas aguardando jitter anti-spam de %.0fs", delay
+            )
+            await asyncio.sleep(delay)
         try:
             await process_scheduled_weather_alerts()
         except Exception:  # pylint: disable=broad-exception-caught

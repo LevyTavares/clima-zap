@@ -5,18 +5,39 @@ para manter exatamente o mesmo contrato de {status, message} — e evitar
 código duplicado entre os caminhos.
 """
 
+# Tipos de inscrição suportados (inscrição modular).
+ALERTS_KIND = "alerts"
+BULLETINS_KIND = "bulletins"
+ALL_KINDS = {ALERTS_KIND, BULLETINS_KIND}
 
-def already_subscribed(phone: str) -> dict:
+
+def _describe(kinds) -> str:
+    kinds = set(kinds) if kinds else set(ALL_KINDS)
+    if kinds == ALL_KINDS:
+        return "alertas e boletins"
+    if kinds == {ALERTS_KIND}:
+        return "alertas"
+    if kinds == {BULLETINS_KIND}:
+        return "boletins"
+    return ", ".join(sorted(kinds))
+
+
+def already_subscribed(phone: str, kinds=None) -> dict:
     return {
         "status": "already_subscribed",
-        "message": f"O número {phone} já se encontra inscrito nos alertas.",
+        "message": (
+            f"O número {phone} já está inscrito em {_describe(kinds)}."
+        ),
     }
 
 
-def subscribed(phone: str) -> dict:
+def subscribed(phone: str, kinds=None) -> dict:
     return {
         "status": "success",
-        "message": f"Inscrição efetuada com sucesso para o número {phone}.",
+        "message": (
+            f"Inscrição efetuada com sucesso em {_describe(kinds)} "
+            f"para o número {phone}."
+        ),
     }
 
 
@@ -29,8 +50,10 @@ def subscription_not_found(phone: str) -> dict:
     }
 
 
-def unsubscribed(phone: str) -> dict:
+def unsubscribed(phone: str, kinds=None) -> dict:
     return {
         "status": "success",
-        "message": f"Inscrição cancelada com sucesso para o número {phone}.",
+        "message": (
+            f"Inscrição cancelada em {_describe(kinds)} para o número {phone}."
+        ),
     }

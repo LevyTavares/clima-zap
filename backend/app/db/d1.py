@@ -65,6 +65,8 @@ def _row_to_subscriber(row: dict) -> Subscriber:
         latitude=row.get("latitude"),
         longitude=row.get("longitude"),
         is_active=bool(row.get("is_active", 0)),
+        receive_alerts=bool(row.get("receive_alerts", 0)),
+        receive_bulletins=bool(row.get("receive_bulletins", 0)),
     )
 
 
@@ -77,21 +79,48 @@ async def find_subscriber(phone: str) -> Subscriber | None:
     return _row_to_subscriber(rows[0]) if rows else None
 
 
-async def subscribe_recipient(phone: str, name: str | None = None) -> dict:
-    """Inscreve ou reativa um destinatário. Retorna {status, message}."""
+async def subscribe_recipient(phone: str, name: str | None = None, kinds=None) -> dict:
+    """Inscreve ou reativa um destinatário nos kinds informados."""
+    wanted = set(kinds) if kinds else set(messages.ALL_KINDS)
     clean_name = name.strip() if name and name.strip() else None
     subscriber = await find_subscriber(phone)
 
-    if subscriber is not None and subscriber.is_active:
-        return messages.already_subscribed(phone)
+    before_alerts = bool(subscriber.receive_alerts) if subscriber else False
+    before_bulletins = bool(subscriber.receive_bulletins) if subscriber else False
+
+    already = subscriber is not None and subscriber.is_active
+    if messages.ALERTS_KIND in wanted and not before_alerts:
+        already = False
+    if messages.BULLETINS_KIND in wanted and not before_bulletins:
+        already = False
+    if not wanted:
+        already = False
+
+    if already:
+        return messages.already_subscribed(phone, wanted)
+
+    new_alerts = before_alerts or (messages.ALERTS_KIND in wanted)
+    new_bulletins = before_bulletins or (messages.BULLETINS_KIND in wanted)
+    new_active = new_alerts or new_bulletins
 
     if subscriber is None:
         await _db().prepare(
-            "INSERT INTO subscribers (phone, name, is_active) VALUES (?, ?, 1)"
-        ).bind(phone, clean_name).run()
+            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins) "
+            "VALUES (?, ?, ?, ?, ?)"
+        ).bind(
+            phone,
+            clean_name,
+            1 if new_active else 0,
+            1 if new_alerts else 0,
+            1 if new_bulletins else 0,
+        ).run()
     else:
-        sets = ["is_active = 1"]
-        params: list[object] = []
+        sets = ["is_active = ?", "receive_alerts = ?", "receive_bulletins = ?"]
+        params: list[object] = [
+            1 if new_active else 0,
+            1 if new_alerts else 0,
+            1 if new_bulletins else 0,
+        ]
         if clean_name is not None:
             sets.append("name = ?")
             params.append(clean_name)
@@ -100,20 +129,43 @@ async def subscribe_recipient(phone: str, name: str | None = None) -> dict:
             f"UPDATE subscribers SET {', '.join(sets)} WHERE phone = ?"
         ).bind(*params).run()
 
-    return messages.subscribed(phone)
+    return messages.subscribed(phone, wanted)
 
 
-async def unsubscribe_recipient(phone: str) -> dict:
-    """Cancela a inscrição (soft delete). Retorna {status, message}."""
+async def unsubscribe_recipient(phone: str, kinds=None) -> dict:
+    """Cancela a inscrição nos kinds informados (padrão: todos)."""
+    wanted = set(kinds) if kinds else set(messages.ALL_KINDS)
+    if not wanted:
+        wanted = set(messages.ALL_KINDS)
     subscriber = await find_subscriber(phone)
 
     if subscriber is None or not subscriber.is_active:
         return messages.subscription_not_found(phone)
 
+    has_any = False
+    if messages.ALERTS_KIND in wanted and subscriber.receive_alerts:
+        has_any = True
+    if messages.BULLETINS_KIND in wanted and subscriber.receive_bulletins:
+        has_any = True
+    if not has_any:
+        return messages.subscription_not_found(phone)
+
+    new_alerts = subscriber.receive_alerts and (messages.ALERTS_KIND not in wanted)
+    new_bulletins = subscriber.receive_bulletins and (
+        messages.BULLETINS_KIND not in wanted
+    )
+    new_active = new_alerts or new_bulletins
+
     await _db().prepare(
-        "UPDATE subscribers SET is_active = 0 WHERE phone = ?"
-    ).bind(phone).run()
-    return messages.unsubscribed(phone)
+        "UPDATE subscribers SET is_active = ?, receive_alerts = ?, receive_bulletins = ? "
+        "WHERE phone = ?"
+    ).bind(
+        1 if new_active else 0,
+        1 if new_alerts else 0,
+        1 if new_bulletins else 0,
+        phone,
+    ).run()
+    return messages.unsubscribed(phone, wanted)
 
 
 async def set_subscriber_location(
@@ -124,8 +176,8 @@ async def set_subscriber_location(
 
     if subscriber is None:
         await _db().prepare(
-            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active)"
-            " VALUES (?, ?, ?, ?, 0)"
+            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
+            "receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, 0, 0, 0)"
         ).bind(phone, name, latitude, longitude).run()
     else:
         await _db().prepare(

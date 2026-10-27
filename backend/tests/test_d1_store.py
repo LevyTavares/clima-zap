@@ -66,7 +66,7 @@ class FakeD1:
             subscriber = self.subscribers.get(params[0])
             rows = [dict(subscriber)] if subscriber else []
 
-        elif sql == "INSERT INTO subscribers (phone, name, is_active) VALUES (?, ?, 1)":
+        elif sql == "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, ?)":
             self.subscribers[params[0]] = {
                 "id": self._next_id,
                 "phone": params[0],
@@ -74,14 +74,16 @@ class FakeD1:
                 "city": None,
                 "latitude": None,
                 "longitude": None,
-                "is_active": 1,
+                "is_active": params[2],
+                "receive_alerts": params[3],
+                "receive_bulletins": params[4],
             }
             self._next_id += 1
             changes = 1
 
         elif sql == (
-            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active)"
-            " VALUES (?, ?, ?, ?, 0)"
+            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
+            "receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, 0, 0, 0)"
         ):
             self.subscribers[params[0]] = {
                 "id": self._next_id,
@@ -91,19 +93,21 @@ class FakeD1:
                 "latitude": params[2],
                 "longitude": params[3],
                 "is_active": 0,
+                "receive_alerts": 0,
+                "receive_bulletins": 0,
             }
             self._next_id += 1
             changes = 1
 
-        elif sql.startswith("UPDATE subscribers SET is_active = 1"):
+        elif sql.startswith("UPDATE subscribers SET is_active = ?"):
+            # new subscribe update: is_active=?, receive_alerts=?, receive_bulletins=?, [name=?], phone=?
+            # params order: is_active, receive_alerts, receive_bulletins, (name?), phone
             subscriber = self.subscribers[params[-1]]
-            subscriber["is_active"] = 1
+            subscriber["is_active"] = params[0]
+            subscriber["receive_alerts"] = params[1]
+            subscriber["receive_bulletins"] = params[2]
             if "name = ?" in sql:
-                subscriber["name"] = params[0]
-            changes = 1
-
-        elif sql == "UPDATE subscribers SET is_active = 0 WHERE phone = ?":
-            self.subscribers[params[0]]["is_active"] = 0
+                subscriber["name"] = params[3]
             changes = 1
 
         elif sql == (
@@ -129,6 +133,13 @@ class FakeD1:
         elif sql == "SELECT * FROM subscribers WHERE is_active = 1":
             rows = [
                 dict(sub) for sub in self.subscribers.values() if sub["is_active"]
+            ]
+
+        elif sql.startswith("SELECT * FROM subscribers WHERE is_active = 1 AND substr(phone, -5)"):
+            suffix = params[0] if params else ""
+            rows = [
+                dict(sub) for sub in self.subscribers.values()
+                if sub["is_active"] and str(sub["phone"]).endswith(suffix)
             ]
 
         elif sql.startswith("INSERT INTO alert_logs"):

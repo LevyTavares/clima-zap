@@ -8,7 +8,13 @@ from fastapi import APIRouter, Header, status, BackgroundTasks, HTTPException
 from app.core import worker_runtime
 from app.core.config import settings
 from app.core.geocode import geocode_city
-from app.core.location import CRAJUBAR_LOCATIONS, LocationData, match_city, parse_coordinates
+from app.core.location import (
+    CRAJUBAR_LOCATIONS,
+    LocationData,
+    NUMERIC_CITY_MAP,
+    match_city,
+    parse_coordinates,
+)
 from app.schemas.webhook import WebhookPayload
 from app.services.admin_commands import handle_admin_command
 from app.services.bot_menu import get_help_message
@@ -92,12 +98,17 @@ def _location_summary(location: LocationData | None) -> str:
 
 
 async def _show_location(recipient: str) -> str:
-    """Comando sem argumentos: mostra o local atual e como alterá-lo."""
+    """Comando sem argumentos: mostra o local atual e as opções numeradas."""
     location = await get_subscriber_location(recipient)
+    numbered = "\n".join(
+        f"{num} - {name}" for num, name in NUMERIC_CITY_MAP.items()
+    )
     return (
         f"{_location_summary(location)}\n"
-        "Envie ```/configuracao <cidade | lat,lon>``` para alterar"
-        " (ex: ```/configuracao Crato```)."
+        "Escolha a cidade da região Crajubar (envie o número):\n"
+        f"{numbered}\n"
+        "Ou use ```/configuracao <cidade | lat,lon>``` "
+        "(ex: ```/configuracao Crato``` ou ```/configuracao 2```)."
     )
 
 
@@ -169,18 +180,24 @@ async def handle_status_command() -> str:
     )
 
 
-async def handle_subscription_command(command: str, recipient: str) -> str:
-    """Comandos `inscrever` / `sair`: ativa ou cancela os alertas do remetente."""
-    if command == "inscrever":
-        result = await subscribe_recipient(recipient)
-        if result["status"] == "already_subscribed":
-            return "ℹ️ Este contato já está inscrito nos alertas climáticos."
-        return "✅ Inscrição realizada! Você receberá os alertas climáticos da sua cidade."
+async def handle_subscription_command(command: str, recipient: str, args: str = "") -> str:
+    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins.
 
-    result = await unsubscribe_recipient(recipient)
+    Sintaxe: ``/inscrever [alertas|boletins|todos]`` e
+    ``/sair [alertas|boletins|todos]``. Sem argumento = todos.
+    """
+    kinds_arg = args.strip() if args else None
+
+    if command == "inscrever":
+        result = await subscribe_recipient(recipient, kinds=kinds_arg)
+        if result["status"] == "already_subscribed":
+            return "ℹ️ " + result["message"].replace("já está inscrito", "já está inscrito")
+        return "✅ " + result["message"]
+
+    result = await unsubscribe_recipient(recipient, kinds=kinds_arg)
     if result["status"] == "not_found":
-        return "ℹ️ Este contato não possui inscrição ativa nos alertas."
-    return "✅ Inscrição cancelada — você não receberá mais alertas climáticos."
+        return "ℹ️ Este contato não possui inscrição ativa nos tipos solicitados."
+    return "✅ " + result["message"]
 
 
 async def handle_forecast_command(recipient: str) -> str:
@@ -219,7 +236,7 @@ async def route_command(command: str, args: str, recipient: str) -> str:
         return await handle_config_command(args, recipient)
 
     if command in ("inscrever", "sair"):
-        return await handle_subscription_command(command, recipient)
+        return await handle_subscription_command(command, recipient, args)
 
     if command in FORECAST_ALIASES:
         return await handle_forecast_command(recipient)
