@@ -25,6 +25,8 @@ class Subscriber(Base):
     # Horário personalizado de boletim para o grupo (formato "HH:MM"), ou None
     # para usar os horários globais (06/14/20h).
     bulletin_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    # Aguardando o usuário enviar a localização pelo WhatsApp (fluxo GPS).
+    awaiting_gps: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # Inscrição modular: alertas climáticos (weather alerts) e boletins
     # periódicos (forecasts) são independentes — o usuário escolhe um,
     # outro ou ambos (ou nenhum, via /sair).

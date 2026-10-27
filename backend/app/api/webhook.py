@@ -25,7 +25,9 @@ from app.services.evolution_client import send_whatsapp_message
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
+    is_awaiting_gps,
     is_duplicate_message,
+    set_awaiting_gps,
     set_subscriber_location,
     should_hint_dm,
     subscribe_recipient,
@@ -44,6 +46,25 @@ def extract_message_content(data: dict) -> str:
     if "extendedTextMessage" in message:
         return message["extendedTextMessage"].get("text", "")
     return ""
+
+
+def extract_location(data: dict):
+    """Extrai (lat, lon, name) de uma mensagem de localização do WhatsApp."""
+    message = data.get("message", {}) or {}
+    loc = message.get("locationMessage")
+    if not isinstance(loc, dict):
+        return None
+    lat = loc.get("degreesLatitude")
+    lon = loc.get("degreesLongitude")
+    if lat is None or lon is None:
+        return None
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return None
+    name = loc.get("name") or loc.get("address")
+    return lat, lon, name
 
 def extract_sender_jid(data: dict) -> str:
     """Extract sender JID from Evolution API data payload."""
@@ -132,6 +153,14 @@ async def _apply_city(recipient: str, city_query: str) -> str:
 
 async def handle_city_command(city_query: str, recipient: str) -> str:
     """Comando `/cidade [nome]` — atalho de /configuracao para cidades."""
+    if city_query.strip().lower() in ("gps", "--gps", "localizacao", "localização"):
+        from app.services.persistence import set_awaiting_gps
+
+        await set_awaiting_gps(recipient, True)
+        return (
+            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
+            "para definir sua cidade."
+        )
     if not city_query:
         return await _show_location(recipient)
     return await _apply_city(recipient, city_query)
@@ -142,6 +171,15 @@ async def handle_config_command(args: str, recipient: str) -> str:
     query = args.strip()
     if not query:
         return await _show_location(recipient)
+
+    if query.lower() in ("gps", "--gps", "localizacao", "localização"):
+        from app.services.persistence import set_awaiting_gps
+
+        await set_awaiting_gps(recipient, True)
+        return (
+            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
+            "para definir sua cidade."
+        )
 
     if query.lower() in ("padrao", "padrão", "reset", "default"):
         await clear_subscriber_location(recipient)
@@ -315,6 +353,28 @@ async def process_event_background(payload: WebhookPayload):
     message_text = extract_message_content(data)
     sender = extract_sender_jid(data)
 
+    recipient = recipient_key(sender) if sender else ""
+
+    # Fluxo GPS: se o destinatário está aguardando localização e a mensagem
+    # é uma localização do WhatsApp, grava lat/lon e responde.
+    location = extract_location(data)
+    if location is not None and recipient and await is_awaiting_gps(recipient):
+        from app.services.persistence import set_awaiting_gps, set_subscriber_location
+
+        lat, lon, name = location
+        place = name or f"{lat:g}, {lon:g}"
+        await set_subscriber_location(recipient, place, lat, lon)
+        await set_awaiting_gps(recipient, False)
+        try:
+            await send_whatsapp_message(
+                recipient,
+                f"✅ Localização definida: *{place}* ({lat:g}, {lon:g})!\n"
+                "Envie ```/clima``` para ver a previsão da sua região.",
+            )
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Erro ao enviar feedback de GPS: %s", error)
+        return
+
     if not message_text or not sender:
         logger.info(
             "Vazio — text=%r sender=%r message_type=%r",
@@ -323,8 +383,6 @@ async def process_event_background(payload: WebhookPayload):
             data.get("messageType"),
         )
         return
-
-    recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
     admin_password = settings.admin_password.get_secret_value()
     admin_attempt = (

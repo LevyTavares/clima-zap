@@ -313,6 +313,29 @@ async def set_bulletin_time(phone: str, time_str: str | None) -> None:
         await session.commit()
 
 
+async def set_awaiting_gps(phone: str, value: bool) -> None:
+    """Marca (ou desmarca) o destinatário aguardando envio de localização."""
+    if worker_runtime.on_workers():
+        await d1.set_awaiting_gps(phone, value)
+        return
+    async with db_session.SessionLocal() as session:
+        subscriber = await _find_subscriber(session, phone)
+        if subscriber is None:
+            subscriber = _orm().Subscriber(phone=phone, is_active=False)
+            session.add(subscriber)
+        subscriber.awaiting_gps = value
+        await session.commit()
+
+
+async def is_awaiting_gps(phone: str) -> bool:
+    """True se o destinatário está aguardando envio de localização."""
+    if worker_runtime.on_workers():
+        return await d1.is_awaiting_gps(phone)
+    async with db_session.SessionLocal() as session:
+        subscriber = await _find_subscriber(session, phone)
+        return bool(subscriber and subscriber.awaiting_gps)
+
+
 async def group_active_subscribers_by_city() -> dict[str, list[Subscriber]]:
     """Agrupa assinantes ativos por cidade ('' = região padrão).
 
