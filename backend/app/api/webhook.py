@@ -55,6 +55,32 @@ def extract_sender_jid(data: dict) -> str:
     return key.get("remoteJid", "")
 
 
+def extract_location(data: dict) -> tuple[float, float, str | None] | None:
+    """Extract coordinates and an optional name from a location message."""
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return None
+
+    location = message.get("locationMessage") or message.get("liveLocationMessage")
+    if not isinstance(location, dict):
+        return None
+
+    latitude = location.get("degreesLatitude")
+    if latitude is None:
+        latitude = location.get("latitude")
+    longitude = location.get("degreesLongitude")
+    if longitude is None:
+        longitude = location.get("longitude")
+    name = location.get("name") or location.get("address")
+    if name is not None and not isinstance(name, str):
+        return None
+
+    try:
+        return float(latitude), float(longitude), name
+    except (ValueError, TypeError):
+        return None
+
+
 def extract_mentioned_jids(data: dict) -> list[str]:
     """JIDs mencionados na mensagem (contextInfo da Evolution/Baileys)."""
     message = data.get("message") or {}
