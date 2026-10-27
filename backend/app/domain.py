@@ -24,3 +24,4 @@ class Subscriber:
     receive_bulletins: bool = False
     bulletin_time: str | None = None
     awaiting_gps: bool = False
+    gps_expires_at: float | None = None

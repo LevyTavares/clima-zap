@@ -27,6 +27,8 @@ class Subscriber(Base):
     bulletin_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     # Aguardando o usuário enviar a localização pelo WhatsApp (fluxo GPS).
     awaiting_gps: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Timestamp (epoch) de expiração do aguardo de GPS (2 min).
+    gps_expires_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Inscrição modular: alertas climáticos (weather alerts) e boletins
     # periódicos (forecasts) são independentes — o usuário escolhe um,
     # outro ou ambos (ou nenhum, via /sair).

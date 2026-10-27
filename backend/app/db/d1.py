@@ -69,6 +69,7 @@ def _row_to_subscriber(row: dict) -> Subscriber:
         receive_bulletins=bool(row.get("receive_bulletins", 0)),
         bulletin_time=row.get("bulletin_time"),
         awaiting_gps=bool(row.get("awaiting_gps", 0)),
+        gps_expires_at=row.get("gps_expires_at"),
     )
 
 
@@ -107,8 +108,8 @@ async def subscribe_recipient(phone: str, name: str | None = None, kinds=None) -
 
     if subscriber is None:
         await _db().prepare(
-            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time, awaiting_gps) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 0)"
+            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) "
+            "VALUES (?, ?, ?, ?, ?, NULL, 0, NULL)"
         ).bind(
             phone,
             clean_name,
@@ -179,7 +180,7 @@ async def set_subscriber_location(
     if subscriber is None:
         await _db().prepare(
             "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
-            "receive_alerts, receive_bulletins, bulletin_time, awaiting_gps) VALUES (?, ?, ?, ?, 0, 0, 0, NULL, 0)"
+            "receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) VALUES (?, ?, ?, ?, 0, 0, 0, NULL, 0, NULL)"
         ).bind(phone, name, latitude, longitude).run()
     else:
         await _db().prepare(
@@ -210,24 +211,35 @@ async def set_bulletin_time(phone: str, time_str: str | None) -> None:
         ).bind(time_str, phone).run()
 
 
-async def set_awaiting_gps(phone: str, value: bool) -> None:
+async def set_awaiting_gps(phone: str, value: bool, expires: float | None = None) -> None:
     """Marca (ou desmarca) o destinatário aguardando envio de localização."""
     subscriber = await find_subscriber(phone)
     if subscriber is None:
         await _db().prepare(
-            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, awaiting_gps) "
-            "VALUES (?, 0, 0, 0, ?)"
-        ).bind(phone, 1 if value else 0).run()
+            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, awaiting_gps, gps_expires_at) "
+            "VALUES (?, 0, 0, 0, ?, ?)"
+        ).bind(phone, 1 if value else 0, expires).run()
     else:
         await _db().prepare(
-            "UPDATE subscribers SET awaiting_gps = ? WHERE phone = ?"
-        ).bind(1 if value else 0, phone).run()
+            "UPDATE subscribers SET awaiting_gps = ?, gps_expires_at = ? WHERE phone = ?"
+        ).bind(1 if value else 0, expires, phone).run()
 
 
-async def is_awaiting_gps(phone: str) -> bool:
-    """True se o destinatário está aguardando envio de localização."""
+async def is_awaiting_gps(phone: str, now: float | None = None) -> bool:
+    """True se o destinatário está aguardando envio de localização (e não expirou)."""
+    import time as _time
+
+    if now is None:
+        now = _time.time()
     subscriber = await find_subscriber(phone)
-    return bool(subscriber and subscriber.awaiting_gps)
+    if not subscriber or not subscriber.awaiting_gps:
+        return False
+    if subscriber.gps_expires_at and now > subscriber.gps_expires_at:
+        await _db().prepare(
+            "UPDATE subscribers SET awaiting_gps = 0, gps_expires_at = NULL WHERE phone = ?"
+        ).bind(phone).run()
+        return False
+    return True
 
 
 async def should_hint_dm(phone: str) -> bool:

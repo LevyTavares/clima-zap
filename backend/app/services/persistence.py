@@ -314,9 +314,15 @@ async def set_bulletin_time(phone: str, time_str: str | None) -> None:
 
 
 async def set_awaiting_gps(phone: str, value: bool) -> None:
-    """Marca (ou desmarca) o destinatário aguardando envio de localização."""
+    """Marca (ou desmarca) o destinatário aguardando envio de localização.
+
+    Quando ativado, define expiração de 2 minutos.
+    """
+    import time as _time
+
+    expires = (_time.time() + 120.0) if value else None
     if worker_runtime.on_workers():
-        await d1.set_awaiting_gps(phone, value)
+        await d1.set_awaiting_gps(phone, value, expires)
         return
     async with db_session.SessionLocal() as session:
         subscriber = await _find_subscriber(session, phone)
@@ -324,16 +330,26 @@ async def set_awaiting_gps(phone: str, value: bool) -> None:
             subscriber = _orm().Subscriber(phone=phone, is_active=False)
             session.add(subscriber)
         subscriber.awaiting_gps = value
+        subscriber.gps_expires_at = expires
         await session.commit()
 
 
 async def is_awaiting_gps(phone: str) -> bool:
-    """True se o destinatário está aguardando envio de localização."""
+    """True se o destinatário está aguardando envio de localização (e não expirou)."""
+    import time as _time
+
     if worker_runtime.on_workers():
-        return await d1.is_awaiting_gps(phone)
+        return await d1.is_awaiting_gps(phone, _time.time())
     async with db_session.SessionLocal() as session:
         subscriber = await _find_subscriber(session, phone)
-        return bool(subscriber and subscriber.awaiting_gps)
+        if not subscriber or not subscriber.awaiting_gps:
+            return False
+        if subscriber.gps_expires_at and _time.time() > subscriber.gps_expires_at:
+            subscriber.awaiting_gps = False
+            subscriber.gps_expires_at = None
+            await session.commit()
+            return False
+        return True
 
 
 async def group_active_subscribers_by_city() -> dict[str, list[Subscriber]]:
