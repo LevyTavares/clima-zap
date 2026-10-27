@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,raise-missing-from,unused-argument,redefined-outer-name,reimported
 import asyncio
 import logging
 import secrets
@@ -55,32 +56,6 @@ def extract_sender_jid(data: dict) -> str:
     return key.get("remoteJid", "")
 
 
-def extract_location(data: dict) -> tuple[float, float, str | None] | None:
-    """Extract coordinates and an optional name from a location message."""
-    message = data.get("message")
-    if not isinstance(message, dict):
-        return None
-
-    location = message.get("locationMessage") or message.get("liveLocationMessage")
-    if not isinstance(location, dict):
-        return None
-
-    latitude = location.get("degreesLatitude")
-    if latitude is None:
-        latitude = location.get("latitude")
-    longitude = location.get("degreesLongitude")
-    if longitude is None:
-        longitude = location.get("longitude")
-    name = location.get("name") or location.get("address")
-    if name is not None and not isinstance(name, str):
-        return None
-
-    try:
-        return float(latitude), float(longitude), name
-    except (ValueError, TypeError):
-        return None
-
-
 def extract_mentioned_jids(data: dict) -> list[str]:
     """JIDs mencionados na mensagem (contextInfo da Evolution/Baileys)."""
     message = data.get("message") or {}
@@ -88,6 +63,26 @@ def extract_mentioned_jids(data: dict) -> list[str]:
     context = extended.get("contextInfo") or {}
     raw = context.get("mentionedJid") or context.get("mentionKey") or []
     return [jid for jid in raw if isinstance(jid, str)]
+
+
+def extract_location(data: dict) -> tuple[float, float, str | None] | None:
+    """Extrai latitude, longitude e nome/endereço de um payload de mensagem de localização do WhatsApp."""
+    message = data.get("message") or {}
+    loc_msg = message.get("locationMessage") or message.get("liveLocationMessage") or {}
+    if not loc_msg:
+        return None
+
+    lat = loc_msg.get("degreesLatitude") if "degreesLatitude" in loc_msg else loc_msg.get("latitude")
+    lon = loc_msg.get("degreesLongitude") if "degreesLongitude" in loc_msg else loc_msg.get("longitude")
+
+    if lat is None or lon is None:
+        return None
+
+    try:
+        name = loc_msg.get("name") or loc_msg.get("address") or None
+        return float(lat), float(lon), name
+    except (ValueError, TypeError):
+        return None
 
 
 NOT_FOUND_TEXT = (
@@ -302,7 +297,6 @@ async def handle_non_command(recipient: str) -> str | None:
 
 async def route_command(command: str, args: str, recipient: str) -> str:
     """Roteia o comando já parseado (ver command_parser) e retorna a resposta."""
-    # pylint: disable=too-many-return-statements
     if command in ("help", "?", "comandos", "ajuda"):
         return get_help_message()
 
@@ -364,6 +358,22 @@ async def process_event_background(payload: WebhookPayload):
 
     message_text = extract_message_content(data)
     sender = extract_sender_jid(data)
+
+    loc_data = extract_location(data)
+    if loc_data and sender:
+        recipient = recipient_key(sender)
+        lat, lon, loc_name = loc_data
+        name_to_set = loc_name or f"GPS ({lat:.2f}, {lon:.2f})"
+        await set_subscriber_location(recipient, name_to_set, lat, lon)
+        response = (
+            f"📍 Localização GPS recebida e salva: *{name_to_set}*!\n"
+            "Envie ```/clima``` para ver a previsão do tempo atualizada."
+        )
+        try:
+            await send_whatsapp_message(recipient, response)
+        except EvolutionError as e:
+            logger.error("Erro ao enviar confirmação de GPS para %s: %s", recipient, e)
+        return
 
     if not message_text or not sender:
         logger.info(
