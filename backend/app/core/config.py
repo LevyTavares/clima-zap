@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Nome do bot na invocação textual: "@clima-zap previsao".
     bot_name: str = "clima-zap"
     forecast_group_jid: str = ""
+    # Janela (em minutos) da previsão on-demand do comando /clima.
+    forecast_window_minutes: int = 60
     # Token opcional exigido no header `Authorization: Bearer <token>` do webhook.
     # Vazio = sem verificação. Configure também um header custom no webhook da Evolution.
     webhook_auth_token: str = ""

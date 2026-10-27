@@ -22,6 +22,9 @@ class Subscriber(Base):
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    # Horário personalizado de boletim para o grupo (formato "HH:MM"), ou None
+    # para usar os horários globais (06/14/20h).
+    bulletin_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     # Inscrição modular: alertas climáticos (weather alerts) e boletins
     # periódicos (forecasts) são independentes — o usuário escolhe um,
     # outro ou ambos (ou nenhum, via /sair).

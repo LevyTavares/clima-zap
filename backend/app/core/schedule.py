@@ -45,7 +45,9 @@ BULLETINS_CRON = "0 9,17,23 * * *"
 # em qualquer minuto; não há como agendar um cron por sessão no Workers).
 ADMIN_SESSION_CHECK_MINUTES = 5
 ADMIN_SESSION_CRON = "*/5 * * * *"
-CRON_EXPRESSIONS = (ALERTS_CRON, BULLETINS_CRON, ADMIN_SESSION_CRON)
+# Boletins personalizados por grupo: verificação a cada minuto.
+CUSTOM_BULLETIN_CRON = "* * * * *"
+CRON_EXPRESSIONS = (ALERTS_CRON, BULLETINS_CRON, ADMIN_SESSION_CRON, CUSTOM_BULLETIN_CRON)
 
 # Cron Triggers têm 15min de wall time por invocação. O jitter dorme dentro do
 # próprio handler, então reservamos uma margem para o envio (HTTP + D1) caber
@@ -83,9 +85,16 @@ def cron_dispatch(cron: str) -> tuple[bool, bool]:
     cron = (cron or "").strip()
     if cron not in CRON_EXPRESSIONS:
         return True, True
+    if cron == CUSTOM_BULLETIN_CRON:
+        return False, False
     return cron == ALERTS_CRON, cron == BULLETINS_CRON
 
 
 def is_admin_session_cron(cron: str) -> bool:
     """True para a expressão que verifica sessões administrativas vencidas."""
     return (cron or "").strip() == ADMIN_SESSION_CRON
+
+
+def is_custom_bulletin_cron(cron: str) -> bool:
+    """True para a expressão que dispara boletins personalizados por grupo."""
+    return (cron or "").strip() == CUSTOM_BULLETIN_CRON

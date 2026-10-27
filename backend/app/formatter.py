@@ -1,5 +1,16 @@
 
 import random
+from datetime import datetime
+
+
+def time_greeting() -> str:
+    """Saudação baseada na hora do dia."""
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        return "Bom dia! ☀️"
+    if 12 <= hour < 18:
+        return "Boa tarde! 🌤️"
+    return "Boa noite! 🌙"
 
 def get_greeting() -> str:
     """Retorna uma saudação amigável e variada."""
@@ -123,6 +134,44 @@ def format_period_summary(  # pylint: disable=too-many-arguments,too-many-positi
         f"{health_tip}"
     )
 
+def format_window_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    city: str,
+    temp_min: float,
+    temp_max: float,
+    humidity: int,
+    uv_index: float,
+    rain_prob: int,
+    window_minutes: int = 60,
+) -> str:
+    """Resumo da previsão para a janela (em minutos) a partir de agora."""
+    uv_alert = "☀️" if uv_index < 6 else "🧴"
+    uv_text = f"{uv_alert} *Índice UV:* {uv_index} "
+    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_index >= 8 else "(_Tranquilo_)"
+
+    health_tip = ""
+    if humidity <= 30:
+        health_tip = "_Dica: A umidade está de deserto hoje! Beba muita água e evite exposição ao sol entre 10h e 16h._ 🚰"
+    elif rain_prob >= 70:
+        health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair para não ser pego de surpresa._ ☂️"
+    elif uv_index >= 8:
+        health_tip = "_Dica: O sol está rachando! Não saia de casa sem protetor solar e óculos escuros._ 😎"
+    else:
+        health_tip = "_Dica: Clima agradável, aproveite o dia!_ 🍃"
+
+    greeting = time_greeting()
+
+    message = (
+        f"{greeting}\n\n"
+        f"📍 *Previsão para {city} — próximos {window_minutes} min*\n\n"
+        f"🌡️ *Temperatura:* {temp_min}°C a {temp_max}°C\n"
+        f"💧 *Umidade:* {humidity}%\n"
+        f"🌧️ *Chance de Chuva:* {rain_prob}%\n"
+        f"{uv_text}\n\n"
+        f"{health_tip}"
+    )
+    return message
+
+
 def format_daily_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     city: str,
     temp_min: float,
@@ -150,7 +199,7 @@ def format_daily_summary(  # pylint: disable=too-many-arguments,too-many-positio
     else:
         health_tip = "_Dica: Clima agradável hoje, aproveite o dia!_ 🍃"
 
-    greeting = get_greeting()
+    greeting = time_greeting()
 
     # Montagem final usando f-strings e formatação do WhatsApp (*negrito*, _itálico_)
     message = (

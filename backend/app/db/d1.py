@@ -67,6 +67,7 @@ def _row_to_subscriber(row: dict) -> Subscriber:
         is_active=bool(row.get("is_active", 0)),
         receive_alerts=bool(row.get("receive_alerts", 0)),
         receive_bulletins=bool(row.get("receive_bulletins", 0)),
+        bulletin_time=row.get("bulletin_time"),
     )
 
 
@@ -105,8 +106,8 @@ async def subscribe_recipient(phone: str, name: str | None = None, kinds=None) -
 
     if subscriber is None:
         await _db().prepare(
-            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins) "
-            "VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time) "
+            "VALUES (?, ?, ?, ?, ?, NULL)"
         ).bind(
             phone,
             clean_name,
@@ -177,7 +178,7 @@ async def set_subscriber_location(
     if subscriber is None:
         await _db().prepare(
             "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
-            "receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, 0, 0, 0)"
+            "receive_alerts, receive_bulletins, bulletin_time) VALUES (?, ?, ?, ?, 0, 0, 0, NULL)"
         ).bind(phone, name, latitude, longitude).run()
     else:
         await _db().prepare(
@@ -192,6 +193,20 @@ async def clear_subscriber_location(phone: str) -> None:
         "UPDATE subscribers SET city = NULL, latitude = NULL, longitude = NULL"
         " WHERE phone = ?"
     ).bind(phone).run()
+
+
+async def set_bulletin_time(phone: str, time_str: str | None) -> None:
+    """Define (ou limpa) o horário personalizado de boletim do grupo."""
+    subscriber = await find_subscriber(phone)
+    if subscriber is None:
+        await _db().prepare(
+            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, bulletin_time) "
+            "VALUES (?, 0, 0, 0, ?)"
+        ).bind(phone, time_str).run()
+    else:
+        await _db().prepare(
+            "UPDATE subscribers SET bulletin_time = ? WHERE phone = ?"
+        ).bind(time_str, phone).run()
 
 
 async def should_hint_dm(phone: str) -> bool:

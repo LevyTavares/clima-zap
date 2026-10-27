@@ -7,7 +7,11 @@ from typing import Literal
 from app.api.api import fetch_cariri_weather
 from app.core.config import settings
 from app.core.location import LocationData
-from app.formatter import format_daily_summary, format_period_summary
+from app.formatter import (
+    format_daily_summary,
+    format_period_summary,
+    format_window_summary,
+)
 from app.services.alerts import generate_weather_alerts
 
 logger = logging.getLogger("uvicorn.error")
@@ -23,33 +27,68 @@ PERIOD_HOURS: dict[Period, tuple[int, int]] = {
 }
 
 
-async def build_current_forecast(location: LocationData | None = None) -> str:
-    """Forecast on-demand do comando `forecast` (resumo diário + alertas)."""
+async def build_current_forecast(
+    location: LocationData | None = None, window_minutes: int | None = None
+) -> str:
+    """Forecast on-demand do comando `forecast` para os próximos N minutos."""
+    from datetime import datetime, timedelta
+
+    if window_minutes is None:
+        window_minutes = settings.forecast_window_minutes
+
     w = await fetch_cariri_weather(location)
     city = location["name"] if location else settings.default_city
     cur = w.current
-    temp_max = (
-        w.daily.temperature_2m_max[0]
-        if w.daily and w.daily.temperature_2m_max
-        else cur.temperature_2m
-    )
-    temp_min = (
-        w.daily.temperature_2m_min[0]
-        if w.daily and w.daily.temperature_2m_min
-        else cur.temperature_2m
-    )
-    summary = format_daily_summary(
+    now = datetime.now()
+    cutoff = now + timedelta(minutes=window_minutes)
+
+    temps: list[float] = []
+    pops: list[float] = []
+    hums: list[float] = []
+    uvs: list[float] = []
+    if w.hourly is not None and getattr(w.hourly, "time", None):
+        for t, temp, pop, hum, uv in zip(
+            w.hourly.time,
+            w.hourly.temperature_2m or [],
+            w.hourly.precipitation_probability or [],
+            w.hourly.relative_humidity_2m or [],
+            w.hourly.uv_index or [],
+        ):
+            try:
+                dt = datetime.fromisoformat(t)
+            except ValueError:
+                continue
+            if now <= dt <= cutoff:
+                temps.append(temp)
+                pops.append(pop)
+                hums.append(hum)
+                uvs.append(uv)
+
+    if temps:
+        temp_min = min(temps)
+        temp_max = max(temps)
+        rain_prob = int(max(pops)) if pops else int(cur.rain * 100)
+        humidity = int(sum(hums) / len(hums)) if hums else int(cur.relative_humidity_2m)
+        uv_index = max(uvs) if uvs else cur.uv_index
+    else:
+        temp_min = temp_max = cur.temperature_2m
+        rain_prob = int(cur.rain * 100)
+        humidity = int(cur.relative_humidity_2m)
+        uv_index = cur.uv_index
+
+    summary = format_window_summary(
         city=city,
         temp_min=temp_min,
         temp_max=temp_max,
-        humidity=int(cur.relative_humidity_2m),
-        uv_index=cur.uv_index,
-        rain_prob=int(cur.rain * 100),
+        humidity=humidity,
+        uv_index=uv_index,
+        rain_prob=rain_prob,
+        window_minutes=window_minutes,
     )
     alerts = generate_weather_alerts(
-        uv_index=cur.uv_index,
-        humidity=cur.relative_humidity_2m,
-        rain_prob=int(cur.rain * 100),
+        uv_index=uv_index,
+        humidity=humidity,
+        rain_prob=rain_prob,
     )
     if alerts:
         summary += "\n\n" + "\n".join(alerts)

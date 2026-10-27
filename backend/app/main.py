@@ -38,6 +38,7 @@ from app.services.persistence import (
     group_active_subscribers_by_city,
     list_active_groups,
     list_active_subscribers,
+    list_groups_with_bulletin_time,
     resolve_group_location,
     subscriber_location,
 )
@@ -164,6 +165,37 @@ async def _bulletin_targets() -> list[tuple[str, LocationData | None]]:
         targets.append((subscriber.phone, subscriber_location(subscriber)))
         seen.add(subscriber.phone)
     return targets
+
+
+async def _period_for_hour(hour: int) -> Period:
+    if hour < 12:
+        return "morning"
+    if hour < 18:
+        return "afternoon"
+    return "night"
+
+
+async def send_custom_bulletins() -> None:
+    """Envia boletins personalizados dos grupos cujo horário coincide."""
+    from datetime import datetime
+
+    now = datetime.now()
+    time_str = now.strftime("%H:%M")
+    try:
+        groups = await list_groups_with_bulletin_time(time_str)
+    except storage_errors() as error:
+        logger.error("Erro ao buscar grupos com boletim personalizado: %s", error)
+        groups = []
+
+    period = _period_for_hour(now.hour)
+    for group in groups:
+        location = subscriber_location(group)
+        try:
+            message = await build_period_forecast(period, location=location)
+            await send_whatsapp_message(group.phone, message)
+            logger.warning("Boletim personalizado enviado para %s (%s)", group.phone, time_str)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.exception("Falha no boletim personalizado de %s: %s", group.phone, error)
 
 
 async def _record_forecast_dispatch(
@@ -315,6 +347,14 @@ async def lifespan(_: FastAPI):
     register_maintenance_job()
     register_forecast_jobs()
     register_admin_session_job()
+    # Boletins personalizados por grupo (verificação a cada minuto).
+    active_scheduler.add_job(
+        send_custom_bulletins,
+        trigger="cron",
+        minute="*",
+        id="custom_bulletins",
+        replace_existing=True,
+    )
     active_scheduler.start()
     try:
         yield

@@ -86,6 +86,7 @@ def test_crons_do_wrangler_espelham_as_constantes():
         schedule.ALERTS_CRON,
         schedule.BULLETINS_CRON,
         schedule.ADMIN_SESSION_CRON,
+        schedule.CUSTOM_BULLETIN_CRON,
     ]
 
 

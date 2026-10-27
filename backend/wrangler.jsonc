@@ -15,7 +15,8 @@
 		"crons": [
 			"0 9,11,15,17,19,21 * * *",
 			"0 9,17,23 * * *",
-			"*/5 * * * *"
+			"*/5 * * * *",
+			"* * * * *"
 		]
 	},
 	// Binding único do D1 (env.DB) — lido em app/core/worker_runtime.d1().

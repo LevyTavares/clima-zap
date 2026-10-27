@@ -29,17 +29,20 @@ from app.core import worker_runtime  # noqa: E402  pylint: disable=wrong-import-
 from app.core.schedule import (  # noqa: E402  pylint: disable=wrong-import-position
     ALERT_JITTER_SECONDS,
     ALERT_SCHEDULE_HOURS,
+    CUSTOM_BULLETIN_CRON,
     FORECAST_JITTER_SECONDS,
     FORECAST_PERIOD_BY_HOUR,
     MAINTENANCE_HOUR,
     cron_dispatch,
     is_admin_session_cron,
+    is_custom_bulletin_cron,
     jitter_delay_seconds,
 )
 from app.main import (  # noqa: E402  pylint: disable=wrong-import-position
     app,
     process_expired_admin_sessions,
     process_scheduled_weather_alerts,
+    send_custom_bulletins,
     send_period_forecast,
 )
 from app.services.alert_history import (  # noqa: E402  pylint: disable=wrong-import-position
@@ -75,6 +78,9 @@ class Default(_AsgiEntrypoint):
 
         if is_admin_session_cron(cron):
             await self._notify_expired_admin_sessions()
+
+        if is_custom_bulletin_cron(cron):
+            await self._send_custom_bulletins()
 
         if alerts_due and hour in ALERT_SCHEDULE_HOURS:
             await self._send_alerts(hour)
@@ -132,3 +138,11 @@ class Default(_AsgiEntrypoint):
             await send_period_forecast(period)
         except Exception:  # pylint: disable=broad-exception-caught
             logger.exception("Erro no boletim %s", period)
+
+    @staticmethod
+    async def _send_custom_bulletins() -> None:
+        """Envia boletins personalizados dos grupos agendados."""
+        try:
+            await send_custom_bulletins()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Erro nos boletins personalizados")

@@ -10,6 +10,8 @@ ALERTS_KIND = "alerts"
 BULLETINS_KIND = "bulletins"
 ALL_KINDS = {ALERTS_KIND, BULLETINS_KIND}
 
+from app.services.addressing import is_group, you
+
 
 def _describe(kinds) -> str:
     kinds = set(kinds) if kinds else set(ALL_KINDS)
@@ -32,11 +34,12 @@ def already_subscribed(phone: str, kinds=None) -> dict:
 
 
 def subscribed(phone: str, kinds=None) -> dict:
+    verb = "receberão" if is_group(phone) else "receberá"
     return {
         "status": "success",
         "message": (
             f"Inscrição efetuada com sucesso em {_describe(kinds)} "
-            f"para o número {phone}."
+            f"para o número {phone}. {you(phone).capitalize()} {verb} as mensagens."
         ),
     }
 

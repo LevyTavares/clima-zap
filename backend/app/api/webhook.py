@@ -179,6 +179,40 @@ async def handle_status_command() -> str:
     )
 
 
+async def handle_agendar_command(recipient: str, args: str = "") -> str:
+    """Agenda um boletim personalizado para o grupo (formato HH:MM)."""
+    from app.services.persistence import set_bulletin_time
+
+    if not recipient.endswith("@g.us"):
+        return "ℹ️ O agendamento de boletins é feito em grupos."
+
+    query = (args or "").strip().lower()
+    if query in ("off", "cancelar", "desativar", "none"):
+        await set_bulletin_time(recipient, None)
+        return "✅ Boletim personalizado desativado para este grupo."
+
+    if not query:
+        return (
+            "ℹ️ Use ```/agendar HH:MM``` (ex: ```/agendar 06:30```) "
+            "ou ```/agendar off``` para desativar."
+        )
+
+    # valida HH:MM
+    parts = query.replace(".", ":").split(":")
+    if len(parts) != 2:
+        return "❌ Formato inválido. Use HH:MM (ex: 06:30)."
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return "❌ Formato inválido. Use HH:MM (ex: 06:30)."
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return "❌ Horário inválido. Use HH:MM (ex: 06:30)."
+    time_str = f"{hour:02d}:{minute:02d}"
+    await set_bulletin_time(recipient, time_str)
+    return f"✅ Boletim personalizado agendado para {time_str} neste grupo."
+
+
 async def handle_subscription_command(command: str, recipient: str, args: str = "") -> str:
     """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins.
 
@@ -236,6 +270,9 @@ async def route_command(command: str, args: str, recipient: str) -> str:
 
     if command in ("inscrever", "sair"):
         return await handle_subscription_command(command, recipient, args)
+
+    if command == "agendar":
+        return await handle_agendar_command(recipient, args)
 
     if command in FORECAST_ALIASES:
         return await handle_forecast_command(recipient)

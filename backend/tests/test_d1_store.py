@@ -66,7 +66,7 @@ class FakeD1:
             subscriber = self.subscribers.get(params[0])
             rows = [dict(subscriber)] if subscriber else []
 
-        elif sql == "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, ?)":
+        elif sql == "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time) VALUES (?, ?, ?, ?, ?, NULL)":
             self.subscribers[params[0]] = {
                 "id": self._next_id,
                 "phone": params[0],
@@ -77,13 +77,14 @@ class FakeD1:
                 "is_active": params[2],
                 "receive_alerts": params[3],
                 "receive_bulletins": params[4],
+                "bulletin_time": None,
             }
             self._next_id += 1
             changes = 1
 
         elif sql == (
             "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
-            "receive_alerts, receive_bulletins) VALUES (?, ?, ?, ?, 0, 0, 0)"
+            "receive_alerts, receive_bulletins, bulletin_time) VALUES (?, ?, ?, ?, 0, 0, 0, NULL)"
         ):
             self.subscribers[params[0]] = {
                 "id": self._next_id,
@@ -95,6 +96,7 @@ class FakeD1:
                 "is_active": 0,
                 "receive_alerts": 0,
                 "receive_bulletins": 0,
+                "bulletin_time": None,
             }
             self._next_id += 1
             changes = 1
@@ -118,6 +120,28 @@ class FakeD1:
             subscriber["city"] = params[0]
             subscriber["latitude"] = params[1]
             subscriber["longitude"] = params[2]
+            changes = 1
+
+        elif sql == "UPDATE subscribers SET bulletin_time = ? WHERE phone = ?":
+            subscriber = self.subscribers.get(params[1])
+            if subscriber is not None:
+                subscriber["bulletin_time"] = params[0]
+                changes = 1
+
+        elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, bulletin_time) VALUES (?, 0, 0, 0, ?)":
+            self.subscribers[params[0]] = {
+                "id": self._next_id,
+                "phone": params[0],
+                "name": None,
+                "city": None,
+                "latitude": None,
+                "longitude": None,
+                "is_active": 0,
+                "receive_alerts": 0,
+                "receive_bulletins": 0,
+                "bulletin_time": params[1],
+            }
+            self._next_id += 1
             changes = 1
 
         elif sql == (

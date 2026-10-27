@@ -275,13 +275,42 @@ async def list_active_subscribers() -> list[Subscriber]:
 
 async def list_active_groups() -> list[Subscriber]:
     """Assinantes ativos cujo destino é grupo (JID terminando em ``@g.us``)
-    e que estão inscritos em boletins periódicos."""
+    e que estão inscritos em boletins periódicos.
+
+    Grupos com horário personalizado (``bulletin_time``) são excluídos do
+    boletim global.
+    """
     return [
         subscriber
         for subscriber in await list_active_subscribers()
         if subscriber.phone.endswith("@g.us")
         and getattr(subscriber, "receive_bulletins", True)
+        and not getattr(subscriber, "bulletin_time", None)
     ]
+
+
+async def list_groups_with_bulletin_time(time_str: str) -> list[Subscriber]:
+    """Grupos ativos cujo horário personalizado de boletim é ``time_str``."""
+    return [
+        subscriber
+        for subscriber in await list_active_subscribers()
+        if subscriber.phone.endswith("@g.us")
+        and getattr(subscriber, "bulletin_time", None) == time_str
+    ]
+
+
+async def set_bulletin_time(phone: str, time_str: str | None) -> None:
+    """Define (ou limpa) o horário personalizado de boletim do grupo."""
+    if worker_runtime.on_workers():
+        await d1.set_bulletin_time(phone, time_str)
+        return
+    async with db_session.SessionLocal() as session:
+        subscriber = await _find_subscriber(session, phone)
+        if subscriber is None:
+            subscriber = _orm().Subscriber(phone=phone, is_active=False)
+            session.add(subscriber)
+        subscriber.bulletin_time = time_str
+        await session.commit()
 
 
 async def group_active_subscribers_by_city() -> dict[str, list[Subscriber]]:
