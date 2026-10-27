@@ -28,13 +28,18 @@ CRAJUBAR_LOCATIONS: Dict[str, LocationData] = {
 
 DEFAULT_LOCATION = CRAJUBAR_LOCATIONS["barbalha"]
 
-# Escolha de cidade por número (região Crajubar) — usada quando o comando
-# vem sem argumentos, exibindo a lista numerada.
-NUMERIC_CITY_MAP: dict[str, str] = {
-    "1": "Barbalha",
-    "2": "Juazeiro do Norte",
-    "3": "Crato",
-}
+# Escolha de cidade por número/emoji (região Crajubar) — usada quando o
+# comando vem sem argumentos, exibindo a lista com emojis.
+CITY_OPTIONS: list[tuple[str, str, str]] = [
+    ("1️⃣", "1", "Barbalha"),
+    ("2️⃣", "2", "Juazeiro do Norte"),
+    ("3️⃣", "3", "Crato"),
+]
+
+NUMERIC_CITY_MAP: dict[str, str] = {}
+for _emoji, _num, _name in CITY_OPTIONS:
+    NUMERIC_CITY_MAP[_num] = _name
+    NUMERIC_CITY_MAP[_emoji] = _name
 
 
 def _normalize_string(text: str) -> str:

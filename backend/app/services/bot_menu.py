@@ -6,6 +6,8 @@ def get_help_message() -> str:
         "🔹 */clima* — Previsão do tempo da sua localização.\n"
         "🔹 */configuracao [cidade | lat,lon]* — Define seu local"
         " (ex: */configuracao Crato* ou */configuracao -7.23, -39.31*).\n"
+        "🔹 Sem argumentos, */configuracao* e */cidade* mostram as cidades da região Crajubar "
+        "(1️⃣ Barbalha, 2️⃣ Juazeiro do Norte, 3️⃣ Crato) — envie o número ou emoji para escolher.\n"
         "🔹 */cidade <nome>* — Atalho para definir a cidade (ex: Barbalha, Crato).\n"
         "🔹 */inscrever [alertas|boletins|todos]* — Inscreve em alertas climáticos e/ou boletins periódicos (padrão: todos).\n"
         "🔹 */sair [alertas|boletins|todos]* — Cancela a inscrição nos tipos informados.\n"

@@ -9,6 +9,7 @@ from app.core import worker_runtime
 from app.core.config import settings
 from app.core.geocode import geocode_city
 from app.core.location import (
+    CITY_OPTIONS,
     CRAJUBAR_LOCATIONS,
     LocationData,
     NUMERIC_CITY_MAP,
@@ -100,9 +101,7 @@ def _location_summary(location: LocationData | None) -> str:
 async def _show_location(recipient: str) -> str:
     """Comando sem argumentos: mostra o local atual e as opções numeradas."""
     location = await get_subscriber_location(recipient)
-    numbered = "\n".join(
-        f"{num} - {name}" for num, name in NUMERIC_CITY_MAP.items()
-    )
+    numbered = "\n".join(f"{emoji} {name}" for emoji, _, name in CITY_OPTIONS)
     return (
         f"{_location_summary(location)}\n"
         "Escolha a cidade da região Crajubar (envie o número):\n"
