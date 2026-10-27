@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from functools import partial
@@ -37,6 +38,7 @@ from app.services.whatsapp_session import check_whatsapp_status
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1", tags=["Webhook"])
 
+
 def extract_message_content(data: dict) -> str:
     """Extract text message from Evolution API data payload."""
     message = data.get("message", {})
@@ -45,6 +47,7 @@ def extract_message_content(data: dict) -> str:
     if "extendedTextMessage" in message:
         return message["extendedTextMessage"].get("text", "")
     return ""
+
 
 def extract_sender_jid(data: dict) -> str:
     """Extract sender JID from Evolution API data payload."""
@@ -59,6 +62,7 @@ def extract_mentioned_jids(data: dict) -> list[str]:
     context = extended.get("contextInfo") or {}
     raw = context.get("mentionedJid") or context.get("mentionKey") or []
     return [jid for jid in raw if isinstance(jid, str)]
+
 
 NOT_FOUND_TEXT = (
     "❓ *Comando não reconhecido*\n\n"
@@ -164,6 +168,28 @@ async def handle_config_command(args: str, recipient: str) -> str:
     return await _apply_city(recipient, query)
 
 
+async def handle_comparar_command() -> str:
+    """Comando `/comparar`: previsão simultânea das 3 cidades do Crajubar."""
+    try:
+        locs = [
+            match_city("barbalha"),
+            match_city("juazeiro do norte"),
+            match_city("crato"),
+        ]
+        forecasts = await asyncio.gather(
+            *[build_current_forecast(loc) for loc in locs if loc is not None]
+        )
+        return (
+            "📊 *Comparativo Regional - Crajubar*\n\n"
+            f"1️⃣ {forecasts[0]}\n\n"
+            f"2️⃣ {forecasts[1]}\n\n"
+            f"3️⃣ {forecasts[2]}"
+        )
+    except Exception as exc:
+        logger.error("Erro ao comparar regiões: %s", exc)
+        return FORECAST_ERROR_TEXT
+
+
 async def handle_status_command() -> str:
     """Comando `status`: estado da API e da instância WhatsApp."""
     wa = await check_whatsapp_status()
@@ -198,7 +224,6 @@ async def handle_agendar_command(recipient: str, args: str = "") -> str:
             "ou ```/agendar off``` para desativar."
         )
 
-    # valida HH:MM
     parts = query.replace(".", ":").split(":")
     if len(parts) != 2:
         return "❌ Formato inválido. Use HH:MM (ex: 06:30)."
@@ -215,11 +240,7 @@ async def handle_agendar_command(recipient: str, args: str = "") -> str:
 
 
 async def handle_subscription_command(command: str, recipient: str, args: str = "") -> str:
-    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins.
-
-    Sintaxe: ``/inscrever [alertas|boletins|todos]`` e
-    ``/sair [alertas|boletins|todos]``. Sem argumento = todos.
-    """
+    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins."""
     kinds_arg = args.strip() if args else None
 
     if command == "inscrever":
@@ -245,8 +266,7 @@ async def handle_forecast_command(recipient: str) -> str:
 
 
 async def handle_non_command(recipient: str) -> str | None:
-    """Texto sem comando: em grupo o bot fica calado; no privado responde a
-    dica de /ajuda uma única vez por contato."""
+    """Texto sem comando: em grupo o bot fica calado; no privado responde a dica de /ajuda."""
     if recipient.endswith("@g.us"):
         return None
     if not await should_hint_dm(recipient):
@@ -269,6 +289,9 @@ async def route_command(command: str, args: str, recipient: str) -> str:
     if command in ("configuracao", "configuração", "config"):
         return await handle_config_command(args, recipient)
 
+    if command in ("comparar", "crajubar"):
+        return await handle_comparar_command()
+
     if command in ("inscrever", "sair"):
         return await handle_subscription_command(command, recipient, args)
 
@@ -279,8 +302,6 @@ async def route_command(command: str, args: str, recipient: str) -> str:
         return await handle_forecast_command(recipient)
 
     if command == "admin":
-        # Administração só no privado: em grupo a senha ficaria exposta e o
-        # bot não deve confirmar que o comando existe.
         if recipient.endswith("@g.us"):
             logger.warning("Comando /admin recusado em grupo: %s", recipient)
             return NOT_FOUND_TEXT
@@ -288,9 +309,11 @@ async def route_command(command: str, args: str, recipient: str) -> str:
 
     return NOT_FOUND_TEXT
 
+
 def normalize_event(event: str) -> str:
     """Normalize event name: 'messages.upsert' / 'MESSAGES_UPSERT' → 'messages_upsert'."""
     return event.strip().lower().replace("-", "_").replace(".", "_")
+
 
 async def process_event_background(payload: WebhookPayload):
     """Process incoming Evolution API webhook event."""
@@ -306,7 +329,7 @@ async def process_event_background(payload: WebhookPayload):
 
     key = data.get("key", {})
     if key.get("fromMe"):
-        return  # ignore own messages / echoes
+        return
 
     message_id = key.get("id", "")
     if message_id and await is_duplicate_message(message_id):
@@ -332,12 +355,10 @@ async def process_event_background(payload: WebhookPayload):
         invocation is not None and invocation.command == "admin"
     ) or (bool(admin_password) and admin_password in message_text)
     if admin_attempt:
-        # Nunca registre a senha em log (o texto completo iria para o stdout).
-        # A checagem por substring cobre erros de digitação (ex.: `/admn ...`)
-        # e mensagens enviadas sem o `/`.
         logger.info("Mensagem de %s: /admin (credenciais omitidas)", sender)
     else:
         logger.info("Mensagem de %s: %s", sender, message_text)
+
     if invocation is None:
         response = await handle_non_command(recipient)
         if response is None:
@@ -353,20 +374,14 @@ async def process_event_background(payload: WebhookPayload):
     except EvolutionError as e:
         logger.error("Erro ao enviar resposta para %s: %s", recipient, e)
 
+
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_webhook(
     payload: WebhookPayload,
     background_tasks: BackgroundTasks,
     authorization: str = Header(default=""),
 ):
-    """
-    Receive WhatsApp webhook from Evolution API.
-
-    SECURITY: exige `Authorization: Bearer <token>` (configure como header
-    customizado no webhook da instância da Evolution API) sempre que
-    WEBHOOK_AUTH_TOKEN estiver definido. Em produção o token é obrigatório:
-    sem ele o endpoint devolve 503 em vez de aceitar eventos forjados.
-    """
+    """Receive WhatsApp webhook from Evolution API."""
     expected = settings.webhook_auth_token
     if not expected:
         if settings.is_production:
@@ -386,8 +401,6 @@ async def receive_webhook(
                 detail="Invalid webhook token",
             )
     logger.info("Webhook: evento %r | instância %r", payload.event, payload.instance)
-    # No Workers o processamento vai para o ctx.waitUntil: a Evolution recebe o
-    # 200 na hora em vez de esperar o fetch do clima + envio da resposta.
     if not worker_runtime.defer(partial(process_event_background, payload)):
         background_tasks.add_task(process_event_background, payload)
     return {"status": "received", "reply": "ok"}
