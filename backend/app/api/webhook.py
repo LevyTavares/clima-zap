@@ -1,4 +1,5 @@
-# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,too-many-statements,raise-missing-from,unused-argument,redefined-outer-name,reimported,unused-import,possibly-used-before-assignment,function-redefined
+# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,too-many-statements,raise-missing-from,unused-argument,redefined-outer-name,reimported,unused-import,possibly-used-before-assignment
+import asyncio
 import logging
 import secrets
 from functools import partial
@@ -27,9 +28,7 @@ from app.services.forecast import build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
-    is_awaiting_gps,
     is_duplicate_message,
-    set_awaiting_gps,
     set_subscriber_location,
     should_hint_dm,
     subscribe_recipient,
@@ -51,24 +50,6 @@ def extract_message_content(data: dict) -> str:
     return ""
 
 
-def extract_location(data: dict):
-    """Extrai (lat, lon, name) de uma mensagem de localização do WhatsApp."""
-    message = data.get("message", {}) or {}
-    loc = message.get("locationMessage")
-    if not isinstance(loc, dict):
-        return None
-    lat = loc.get("degreesLatitude")
-    lon = loc.get("degreesLongitude")
-    if lat is None or lon is None:
-        return None
-    try:
-        lat = float(lat)
-        lon = float(lon)
-    except (TypeError, ValueError):
-        return None
-    name = loc.get("name") or loc.get("address")
-    return lat, lon, name
-
 def extract_sender_jid(data: dict) -> str:
     """Extract sender JID from Evolution API data payload."""
     key = data.get("key", {})
@@ -85,7 +66,7 @@ def extract_mentioned_jids(data: dict) -> list[str]:
 
 
 def extract_location(data: dict) -> tuple[float, float, str | None] | None:
-    """Extrai latitude, longitude e nome/endereço de um payload de mensagem de localização do WhatsApp."""
+    """Extrai latitude, longitude e nome/endereço de um payload de localização."""
     message = data.get("message") or {}
     loc_msg = message.get("locationMessage") or message.get("liveLocationMessage") or {}
     if not loc_msg:
@@ -177,14 +158,6 @@ async def _apply_city(recipient: str, city_query: str) -> str:
 
 async def handle_city_command(city_query: str, recipient: str) -> str:
     """Comando `/cidade [nome]` — atalho de /configuracao para cidades."""
-    if city_query.strip().lower() in ("gps", "--gps", "localizacao", "localização"):
-        from app.services.persistence import set_awaiting_gps
-
-        await set_awaiting_gps(recipient, True)
-        return (
-            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
-            "para definir sua cidade."
-        )
     if not city_query:
         return await _show_location(recipient)
     return await _apply_city(recipient, city_query)
@@ -195,15 +168,6 @@ async def handle_config_command(args: str, recipient: str) -> str:
     query = args.strip()
     if not query:
         return await _show_location(recipient)
-
-    if query.lower() in ("gps", "--gps", "localizacao", "localização"):
-        from app.services.persistence import set_awaiting_gps
-
-        await set_awaiting_gps(recipient, True)
-        return (
-            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
-            "para definir sua cidade."
-        )
 
     if query.lower() in ("padrao", "padrão", "reset", "default"):
         await clear_subscriber_location(recipient)
@@ -409,26 +373,6 @@ async def process_event_background(payload: WebhookPayload):
             await send_whatsapp_message(recipient, response)
         except EvolutionError as e:
             logger.error("Erro ao enviar confirmação de GPS para %s: %s", recipient, e)
-    recipient = recipient_key(sender) if sender else ""
-
-    # Fluxo GPS: se o destinatário está aguardando localização e a mensagem
-    # é uma localização do WhatsApp, grava lat/lon e responde.
-    location = extract_location(data)
-    if location is not None and recipient and await is_awaiting_gps(recipient):
-        from app.services.persistence import set_awaiting_gps, set_subscriber_location
-
-        lat, lon, name = location
-        place = name or f"{lat:g}, {lon:g}"
-        await set_subscriber_location(recipient, place, lat, lon)
-        await set_awaiting_gps(recipient, False)
-        try:
-            await send_whatsapp_message(
-                recipient,
-                f"✅ Localização definida: *{place}* ({lat:g}, {lon:g})!\n"
-                "Envie ```/clima``` para ver a previsão da sua região.",
-            )
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Erro ao enviar feedback de GPS: %s", error)
         return
 
     if not message_text or not sender:
@@ -439,6 +383,8 @@ async def process_event_background(payload: WebhookPayload):
             data.get("messageType"),
         )
         return
+
+    recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
     admin_password = settings.admin_password.get_secret_value()
     admin_attempt = (

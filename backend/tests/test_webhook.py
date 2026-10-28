@@ -1,3 +1,4 @@
+# pylint: disable=unused-import
 """Testes da gramática do bot no webhook, do roteador e da autenticação.
 
 Comandos só valem como ``/comando`` ou ``@clima-zap comando`` (ver
