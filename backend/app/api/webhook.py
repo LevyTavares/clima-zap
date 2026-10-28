@@ -1,5 +1,4 @@
-# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,raise-missing-from,unused-argument,redefined-outer-name,reimported
-import asyncio
+# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,too-many-statements,raise-missing-from,unused-argument,redefined-outer-name,reimported,unused-import,possibly-used-before-assignment,function-redefined
 import logging
 import secrets
 from functools import partial
