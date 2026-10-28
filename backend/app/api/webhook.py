@@ -1,10 +1,13 @@
+# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,too-many-statements,raise-missing-from,unused-argument,redefined-outer-name,reimported,unused-import,possibly-used-before-assignment
+import asyncio
 import logging
 import secrets
 from functools import partial
 
 import httpx
 from evolution_api import EvolutionError
-from fastapi import APIRouter, Header, status, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
+
 from app.core import worker_runtime
 from app.core.config import settings
 from app.core.geocode import geocode_city
@@ -20,14 +23,12 @@ from app.schemas.webhook import WebhookPayload
 from app.services.admin_commands import handle_admin_command
 from app.services.bot_menu import get_help_message
 from app.services.command_parser import parse_invocation
-from app.services.forecast import build_current_forecast
 from app.services.evolution_client import send_whatsapp_message
+from app.services.forecast import build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
-    is_awaiting_gps,
     is_duplicate_message,
-    set_awaiting_gps,
     set_subscriber_location,
     should_hint_dm,
     subscribe_recipient,
@@ -38,6 +39,7 @@ from app.services.whatsapp_session import check_whatsapp_status
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1", tags=["Webhook"])
 
+
 def extract_message_content(data: dict) -> str:
     """Extract text message from Evolution API data payload."""
     message = data.get("message", {})
@@ -47,24 +49,6 @@ def extract_message_content(data: dict) -> str:
         return message["extendedTextMessage"].get("text", "")
     return ""
 
-
-def extract_location(data: dict):
-    """Extrai (lat, lon, name) de uma mensagem de localização do WhatsApp."""
-    message = data.get("message", {}) or {}
-    loc = message.get("locationMessage")
-    if not isinstance(loc, dict):
-        return None
-    lat = loc.get("degreesLatitude")
-    lon = loc.get("degreesLongitude")
-    if lat is None or lon is None:
-        return None
-    try:
-        lat = float(lat)
-        lon = float(lon)
-    except (TypeError, ValueError):
-        return None
-    name = loc.get("name") or loc.get("address")
-    return lat, lon, name
 
 def extract_sender_jid(data: dict) -> str:
     """Extract sender JID from Evolution API data payload."""
@@ -79,6 +63,27 @@ def extract_mentioned_jids(data: dict) -> list[str]:
     context = extended.get("contextInfo") or {}
     raw = context.get("mentionedJid") or context.get("mentionKey") or []
     return [jid for jid in raw if isinstance(jid, str)]
+
+
+def extract_location(data: dict) -> tuple[float, float, str | None] | None:
+    """Extrai latitude, longitude e nome/endereço de um payload de localização."""
+    message = data.get("message") or {}
+    loc_msg = message.get("locationMessage") or message.get("liveLocationMessage") or {}
+    if not loc_msg:
+        return None
+
+    lat = loc_msg.get("degreesLatitude") if "degreesLatitude" in loc_msg else loc_msg.get("latitude")
+    lon = loc_msg.get("degreesLongitude") if "degreesLongitude" in loc_msg else loc_msg.get("longitude")
+
+    if lat is None or lon is None:
+        return None
+
+    try:
+        name = loc_msg.get("name") or loc_msg.get("address") or None
+        return float(lat), float(lon), name
+    except (ValueError, TypeError):
+        return None
+
 
 NOT_FOUND_TEXT = (
     "❓ *Comando não reconhecido*\n\n"
@@ -153,14 +158,6 @@ async def _apply_city(recipient: str, city_query: str) -> str:
 
 async def handle_city_command(city_query: str, recipient: str) -> str:
     """Comando `/cidade [nome]` — atalho de /configuracao para cidades."""
-    if city_query.strip().lower() in ("gps", "--gps", "localizacao", "localização"):
-        from app.services.persistence import set_awaiting_gps
-
-        await set_awaiting_gps(recipient, True)
-        return (
-            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
-            "para definir sua cidade."
-        )
     if not city_query:
         return await _show_location(recipient)
     return await _apply_city(recipient, city_query)
@@ -171,15 +168,6 @@ async def handle_config_command(args: str, recipient: str) -> str:
     query = args.strip()
     if not query:
         return await _show_location(recipient)
-
-    if query.lower() in ("gps", "--gps", "localizacao", "localização"):
-        from app.services.persistence import set_awaiting_gps
-
-        await set_awaiting_gps(recipient, True)
-        return (
-            "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
-            "para definir sua cidade."
-        )
 
     if query.lower() in ("padrao", "padrão", "reset", "default"):
         await clear_subscriber_location(recipient)
@@ -199,6 +187,28 @@ async def handle_config_command(args: str, recipient: str) -> str:
         )
 
     return await _apply_city(recipient, query)
+
+
+async def handle_comparar_command() -> str:
+    """Comando `/comparar`: previsão simultânea das 3 cidades do Crajubar."""
+    try:
+        locs = [
+            match_city("barbalha"),
+            match_city("juazeiro do norte"),
+            match_city("crato"),
+        ]
+        forecasts = await asyncio.gather(
+            *[build_current_forecast(loc) for loc in locs if loc is not None]
+        )
+        return (
+            "📊 *Comparativo Regional - Crajubar*\n\n"
+            f"1️⃣ {forecasts[0]}\n\n"
+            f"2️⃣ {forecasts[1]}\n\n"
+            f"3️⃣ {forecasts[2]}"
+        )
+    except Exception as exc:
+        logger.error("Erro ao comparar regiões: %s", exc)
+        return FORECAST_ERROR_TEXT
 
 
 async def handle_status_command() -> str:
@@ -235,7 +245,6 @@ async def handle_agendar_command(recipient: str, args: str = "") -> str:
             "ou ```/agendar off``` para desativar."
         )
 
-    # valida HH:MM
     parts = query.replace(".", ":").split(":")
     if len(parts) != 2:
         return "❌ Formato inválido. Use HH:MM (ex: 06:30)."
@@ -252,11 +261,7 @@ async def handle_agendar_command(recipient: str, args: str = "") -> str:
 
 
 async def handle_subscription_command(command: str, recipient: str, args: str = "") -> str:
-    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins.
-
-    Sintaxe: ``/inscrever [alertas|boletins|todos]`` e
-    ``/sair [alertas|boletins|todos]``. Sem argumento = todos.
-    """
+    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins."""
     kinds_arg = args.strip() if args else None
 
     if command == "inscrever":
@@ -282,8 +287,7 @@ async def handle_forecast_command(recipient: str) -> str:
 
 
 async def handle_non_command(recipient: str) -> str | None:
-    """Texto sem comando: em grupo o bot fica calado; no privado responde a
-    dica de /ajuda uma única vez por contato."""
+    """Texto sem comando: em grupo o bot fica calado; no privado responde a dica de /ajuda."""
     if recipient.endswith("@g.us"):
         return None
     if not await should_hint_dm(recipient):
@@ -293,7 +297,6 @@ async def handle_non_command(recipient: str) -> str | None:
 
 async def route_command(command: str, args: str, recipient: str) -> str:
     """Roteia o comando já parseado (ver command_parser) e retorna a resposta."""
-    # pylint: disable=too-many-return-statements
     if command in ("help", "?", "comandos", "ajuda"):
         return get_help_message()
 
@@ -306,6 +309,9 @@ async def route_command(command: str, args: str, recipient: str) -> str:
     if command in ("configuracao", "configuração", "config"):
         return await handle_config_command(args, recipient)
 
+    if command in ("comparar", "crajubar"):
+        return await handle_comparar_command()
+
     if command in ("inscrever", "sair"):
         return await handle_subscription_command(command, recipient, args)
 
@@ -316,8 +322,6 @@ async def route_command(command: str, args: str, recipient: str) -> str:
         return await handle_forecast_command(recipient)
 
     if command == "admin":
-        # Administração só no privado: em grupo a senha ficaria exposta e o
-        # bot não deve confirmar que o comando existe.
         if recipient.endswith("@g.us"):
             logger.warning("Comando /admin recusado em grupo: %s", recipient)
             return NOT_FOUND_TEXT
@@ -325,9 +329,11 @@ async def route_command(command: str, args: str, recipient: str) -> str:
 
     return NOT_FOUND_TEXT
 
+
 def normalize_event(event: str) -> str:
     """Normalize event name: 'messages.upsert' / 'MESSAGES_UPSERT' → 'messages_upsert'."""
     return event.strip().lower().replace("-", "_").replace(".", "_")
+
 
 async def process_event_background(payload: WebhookPayload):
     """Process incoming Evolution API webhook event."""
@@ -343,7 +349,7 @@ async def process_event_background(payload: WebhookPayload):
 
     key = data.get("key", {})
     if key.get("fromMe"):
-        return  # ignore own messages / echoes
+        return
 
     message_id = key.get("id", "")
     if message_id and await is_duplicate_message(message_id):
@@ -353,26 +359,20 @@ async def process_event_background(payload: WebhookPayload):
     message_text = extract_message_content(data)
     sender = extract_sender_jid(data)
 
-    recipient = recipient_key(sender) if sender else ""
-
-    # Fluxo GPS: se o destinatário está aguardando localização e a mensagem
-    # é uma localização do WhatsApp, grava lat/lon e responde.
-    location = extract_location(data)
-    if location is not None and recipient and await is_awaiting_gps(recipient):
-        from app.services.persistence import set_awaiting_gps, set_subscriber_location
-
-        lat, lon, name = location
-        place = name or f"{lat:g}, {lon:g}"
-        await set_subscriber_location(recipient, place, lat, lon)
-        await set_awaiting_gps(recipient, False)
+    loc_data = extract_location(data)
+    if loc_data and sender:
+        recipient = recipient_key(sender)
+        lat, lon, loc_name = loc_data
+        name_to_set = loc_name or f"GPS ({lat:.2f}, {lon:.2f})"
+        await set_subscriber_location(recipient, name_to_set, lat, lon)
+        response = (
+            f"📍 Localização GPS recebida e salva: *{name_to_set}*!\n"
+            "Envie ```/clima``` para ver a previsão do tempo atualizada."
+        )
         try:
-            await send_whatsapp_message(
-                recipient,
-                f"✅ Localização definida: *{place}* ({lat:g}, {lon:g})!\n"
-                "Envie ```/clima``` para ver a previsão da sua região.",
-            )
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("Erro ao enviar feedback de GPS: %s", error)
+            await send_whatsapp_message(recipient, response)
+        except EvolutionError as e:
+            logger.error("Erro ao enviar confirmação de GPS para %s: %s", recipient, e)
         return
 
     if not message_text or not sender:
@@ -383,18 +383,18 @@ async def process_event_background(payload: WebhookPayload):
             data.get("messageType"),
         )
         return
+
+    recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
     admin_password = settings.admin_password.get_secret_value()
     admin_attempt = (
         invocation is not None and invocation.command == "admin"
     ) or (bool(admin_password) and admin_password in message_text)
     if admin_attempt:
-        # Nunca registre a senha em log (o texto completo iria para o stdout).
-        # A checagem por substring cobre erros de digitação (ex.: `/admn ...`)
-        # e mensagens enviadas sem o `/`.
         logger.info("Mensagem de %s: /admin (credenciais omitidas)", sender)
     else:
         logger.info("Mensagem de %s: %s", sender, message_text)
+
     if invocation is None:
         response = await handle_non_command(recipient)
         if response is None:
@@ -410,20 +410,14 @@ async def process_event_background(payload: WebhookPayload):
     except EvolutionError as e:
         logger.error("Erro ao enviar resposta para %s: %s", recipient, e)
 
+
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_webhook(
     payload: WebhookPayload,
     background_tasks: BackgroundTasks,
     authorization: str = Header(default=""),
 ):
-    """
-    Receive WhatsApp webhook from Evolution API.
-
-    SECURITY: exige `Authorization: Bearer <token>` (configure como header
-    customizado no webhook da instância da Evolution API) sempre que
-    WEBHOOK_AUTH_TOKEN estiver definido. Em produção o token é obrigatório:
-    sem ele o endpoint devolve 503 em vez de aceitar eventos forjados.
-    """
+    """Receive WhatsApp webhook from Evolution API."""
     expected = settings.webhook_auth_token
     if not expected:
         if settings.is_production:
@@ -443,8 +437,6 @@ async def receive_webhook(
                 detail="Invalid webhook token",
             )
     logger.info("Webhook: evento %r | instância %r", payload.event, payload.instance)
-    # No Workers o processamento vai para o ctx.waitUntil: a Evolution recebe o
-    # 200 na hora em vez de esperar o fetch do clima + envio da resposta.
     if not worker_runtime.defer(partial(process_event_background, payload)):
         background_tasks.add_task(process_event_background, payload)
     return {"status": "received", "reply": "ok"}

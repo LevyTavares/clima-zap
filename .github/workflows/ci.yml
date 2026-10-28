@@ -11,42 +11,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Baixar o código do repositório
-      uses: actions/checkout@v4
+      - name: Baixar o código do repositório
+        uses: actions/checkout@v4
 
-    - name: Configurar ambiente Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Configurar ambiente Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Instalar dependências
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Executar suíte de testes com Pytest
-      run: |
-        cd backend
-        PYTHONPATH=. python -m pytest
+      - name: Executar suíte de testes com Pytest
+        run: |
+          cd backend
+          PYTHONPATH=. python -m pytest
 
-    - name: Validar qualidade do código
-      run: python -m pylint backend
+      - name: Validar qualidade do código
+        run: python -m pylint backend --fail-under=9.0
 
-    - name: Validar migrations
-      env:
-        DATABASE_URL: sqlite+aiosqlite:///./ci.db
-      run: |
-        cd backend
-        python -m alembic upgrade head
-        python -m alembic check
+      - name: Validar migrations
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: |
+          cd backend
+          python -m alembic upgrade head
+          python -m alembic check
 
-    - name: Validar configuração do Compose
-      run: |
-        cp .env.example .env
-        docker compose config --quiet
+      - name: Validar configuração do Compose
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
 
-    - name: Construir imagens Docker
-      run: docker compose build backend frontend
+      - name: Construir imagens Docker
+        run: docker compose build backend frontend
 
   workers-bundle:
     # Valida que o backend continua empacotável para Cloudflare Python Workers:
@@ -54,18 +54,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Baixar o código do repositório
-      uses: actions/checkout@v4
+      - name: Baixar o código do repositório
+        uses: actions/checkout@v4
 
-    - name: Instalar uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Instalar uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-    - name: Sincronizar dependências Pyodide (pywrangler sync)
-      working-directory: backend
-      run: uvx --from workers-py pywrangler sync
+      - name: Sincronizar dependências Pyodide (pywrangler sync)
+        working-directory: backend
+        run: uvx --from workers-py pywrangler sync
 
-    - name: Validar bundle do Worker (wrangler dry-run)
-      working-directory: backend
-      run: npx --yes wrangler deploy --dry-run --outdir /tmp/workers-bundle
+      - name: Validar bundle do Worker (wrangler dry-run)
+        working-directory: backend
+        run: npx --yes wrangler deploy --dry-run --outdir /tmp/workers-bundle

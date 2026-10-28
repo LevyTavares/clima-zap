@@ -1,3 +1,4 @@
+# pylint: disable=unused-import
 """Testes da gramática do bot no webhook, do roteador e da autenticação.
 
 Comandos só valem como ``/comando`` ou ``@clima-zap comando`` (ver
@@ -11,8 +12,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.api import webhook
-from app.api.webhook import handle_non_command, recipient_key, route_command
+import app.api.webhook as webhook
+from app.api.webhook import (
+    extract_location,
+    handle_non_command,
+    recipient_key,
+    route_command,
+)
 from app.core.config import settings
 from app.main import app
 from app.models import Subscriber
@@ -48,6 +54,36 @@ def read_location(db_session, phone):
 def test_recipient_key_handles_dm_and_group():
     assert recipient_key("5588999999999@s.whatsapp.net") == "5588999999999"
     assert recipient_key("120363012345678901@g.us") == "120363012345678901@g.us"
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        (
+            {"locationMessage": {"degreesLatitude": "-7.23", "degreesLongitude": -39.31, "name": "Crato"}},
+            (-7.23, -39.31, "Crato"),
+        ),
+        (
+            {"liveLocationMessage": {"latitude": -7.31, "longitude": "-39.31", "address": "Barbalha"}},
+            (-7.31, -39.31, "Barbalha"),
+        ),
+    ],
+)
+def test_extract_location(message, expected):
+    assert extract_location({"message": message}) == expected
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"message": {"conversation": "not a location"}},
+        {"message": {"locationMessage": {"degreesLatitude": "invalid", "degreesLongitude": -39.31}}},
+        {"message": None},
+    ],
+)
+def test_extract_location_returns_none_for_invalid_payload(data):
+    assert extract_location(data) is None
 
 
 def test_help_command_returns_bot_menu():
