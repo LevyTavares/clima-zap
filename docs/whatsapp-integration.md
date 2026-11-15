@@ -24,9 +24,10 @@ docker run -d \
   atendai/evolution-api
 ```
 
-> O Compose da raiz já sobe essa stack (`docker compose up -d postgres redis
-> evolution-api`). Em produção, a Evolution precisa de um host always-on com
-> **HTTPS público** (o Worker não alcança `localhost`) — veja o README.
+> O Compose da raiz já sobe essa stack (`docker compose --profile dev up -d
+> postgres redis evolution-api`). Em produção, a Evolution precisa de um host
+> always-on com **HTTPS público** (o Worker não alcança `localhost`) — veja o
+> README.
 
 ### 2. Create Instance
 

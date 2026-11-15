@@ -46,7 +46,7 @@ jobs:
           docker compose config --quiet
 
       - name: Construir imagens Docker
-        run: docker compose build backend frontend
+        run: docker compose --profile dev build backend frontend
 
   workers-bundle:
     # Valida que o backend continua empacotável para Cloudflare Python Workers:

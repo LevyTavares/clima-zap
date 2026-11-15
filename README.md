@@ -175,15 +175,24 @@ cp .env.example .env
 #    Opcional: FORECAST_GROUP_JID=120363...@g.us ativa boletim 3×/dia no grupo
 vim .env
 
-# 3. Build e start
-docker compose up --build -d
+# 3. Build e start (perfil dev é obrigatório)
+docker compose --profile dev up --build -d
 
 # 4. Verificar status
-docker compose ps
+docker compose --profile dev ps
 
 # Logs do backend
-docker compose logs -f backend
+docker compose --profile dev logs -f backend
 ```
+
+> **Proteção local:** o Compose sobe com `ENABLE_SCHEDULER=false` e
+> `ALLOW_OUTBOUND=false`. Assim o backend local não agenda alertas/boletins nem
+> envia WhatsApp por padrão, evitando duplicar o Worker de produção. Para testar
+> envios, use uma instância/número de teste e habilite explicitamente:
+>
+> ```bash
+> ALLOW_OUTBOUND=true ENABLE_SCHEDULER=true docker compose --profile dev up -d
+> ```
 
 ### URLs locais
 
@@ -232,7 +241,7 @@ Rodar backend/frontend nativamente, mantendo infraestrutura no Docker:
 
 ```bash
 # Apenas infraestrutura
-docker compose up -d postgres redis evolution-api
+docker compose --profile dev up -d postgres redis evolution-api
 
 # Backend local
 pip install -r requirements.txt
@@ -584,16 +593,18 @@ curl -X POST "http://localhost:8000/api/v1/webhook" \
 
 - Rede: `clima-zap-net` (bridge)
 - Backend monta `./docs:/docs:ro` (somente leitura)
+- Todos os serviços usam o perfil `dev`: `docker compose up` sem `--profile dev`
+  não sobe nada. O backend local inicia sem scheduler e sem envio real.
 
 ### Comandos úteis
 
 ```bash
-docker compose up -d              # iniciar
-docker compose down               # parar (mantém volumes)
-docker compose down -v            # parar + apagar volumes (perda de dados!)
-docker compose logs -f backend    # logs do backend
-docker compose build backend      # rebuild após mudança de código
-docker compose restart evolution-api
+docker compose --profile dev up -d              # iniciar
+docker compose --profile dev down               # parar (mantém volumes)
+docker compose --profile dev down -v            # parar + apagar volumes (perda de dados!)
+docker compose --profile dev logs -f backend    # logs do backend
+docker compose --profile dev build backend      # rebuild após mudança de código
+docker compose --profile dev restart evolution-api
 ```
 
 ---
@@ -613,8 +624,9 @@ Testes da suíte principal:
 | `tests/test_d1_store.py` | 25 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history, sessões administrativas e conversão FFI |
 | `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
 | `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |
-| `tests/test_main.py` | 13 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), verificação de sessão admin a cada 5min, envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
-| `tests/test_config.py` | 7 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request) e avisos `production_warnings` de defaults inseguros (inclui `ADMIN_PASSWORD` curta) |
+| `tests/test_main.py` | 15 | Endpoints, scheduler de alertas, registro/skip dos 3 jobs de forecast (jitter 900s), trava `ENABLE_SCHEDULER`, verificação de sessão admin a cada 5min, envio do boletim, endpoint `/api/v1/clima/cariri` (com `?cidade=`) |
+| `tests/test_config.py` | 10 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request), `ENABLE_SCHEDULER`/`ALLOW_OUTBOUND` e avisos `production_warnings` de defaults inseguros (inclui `ADMIN_PASSWORD` curta) |
+| `tests/test_evolution_client.py` | 3 | Trava de envio: bloqueado por padrão fora de produção, liberado em produção e com opt-in explícito |
 | `tests/test_schedule.py` | 10 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), cron de sessão admin, crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
 | `tests/test_forecast.py` | 8 | Agregação por período (manhã/tarde/noite), formatação, builders on-demand e periódico |
 | `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
@@ -697,6 +709,10 @@ Para ativar o CD: crie um [API Token](https://dash.cloudflare.com/profile/api-to
 - **Webhook fail closed:** em produção `WEBHOOK_AUTH_TOKEN` é obrigatório — sem
   ele `POST /api/v1/webhook` responde **503** em vez de aceitar eventos
   forjados. A comparação do Bearer é em tempo constante (`secrets.compare_digest`)
+- **Ambiente local sem efeito colateral:** o Compose usa o perfil `dev` e força
+  `ENABLE_SCHEDULER=false`/`ALLOW_OUTBOUND=false`; sem opt-in explícito o
+  backend local não agenda jobs nem envia WhatsApp. Para testar, use uma
+  instância/número separado da produção
 - **Defaults inseguros:** trocar `EVOLUTION_API_KEY` (`openssl rand -hex 32`) e
   `POSTGRES_PASSWORD` antes de produção. Com `ENVIRONMENT=production` a app
   avisa no startup (`settings.production_warnings`) se ainda estiverem no

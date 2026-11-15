@@ -26,14 +26,29 @@ cp .env.example .env
 #    Optional: FORECAST_GROUP_JID=120363...@g.us → 3x/day group bulletin
 vim .env
 
-# 3. Build & start
-docker compose up --build -d
+# 3. Build & start (dev profile is required)
+docker compose --profile dev up --build -d
 
 # 4. Check status
-docker compose ps
+docker compose --profile dev ps
 
 # Logs
-docker compose logs -f backend
+docker compose --profile dev logs -f backend
+```
+
+## Local safety defaults
+
+The local stack starts with:
+
+- `ENABLE_SCHEDULER=false` — no APScheduler jobs (alerts/bulletins);
+- `ALLOW_OUTBOUND=false` — no real WhatsApp sends.
+
+This prevents a local backend connected to the same Evolution instance from
+duplicating the production Worker. To test sends, use a separate test instance
+and opt in explicitly:
+
+```bash
+ALLOW_OUTBOUND=true ENABLE_SCHEDULER=true docker compose --profile dev up -d
 ```
 
 ## URLs (local)
@@ -76,12 +91,12 @@ curl -X POST "http://localhost:8080/webhook/set/clima-zap" \
 ## Common Commands
 
 ```bash
-docker compose up -d            # start
-docker compose down             # stop (keeps volumes)
-docker compose down -v          # stop + wipe volumes (data loss!)
-docker compose logs -f backend  # follow backend logs
-docker compose build backend    # rebuild after code change
-docker compose restart evolution-api
+docker compose --profile dev up -d            # start
+docker compose --profile dev down             # stop (keeps volumes)
+docker compose --profile dev down -v          # stop + wipe volumes (data loss!)
+docker compose --profile dev logs -f backend  # follow backend logs
+docker compose --profile dev build backend    # rebuild after code change
+docker compose --profile dev restart evolution-api
 ```
 
 ## Dev Mode (no Docker for backend)
@@ -90,7 +105,7 @@ Run backend/Frontend natively, keep Infra in Docker:
 
 ```bash
 # Only infra
-docker compose up -d postgres redis evolution-api
+docker compose --profile dev up -d postgres redis evolution-api
 
 # Backend local
 cd backend
@@ -105,6 +120,8 @@ npm run dev
 ## Security
 
 - Change `EVOLUTION_API_KEY`, `POSTGRES_PASSWORD` before production.
+- Local Compose forces `ENABLE_SCHEDULER=false` and `ALLOW_OUTBOUND=false`; use a
+  separate test instance/number before opting in with `ALLOW_OUTBOUND=true`.
 - Production: set `WEBHOOK_GLOBAL_URL` to HTTPS public URL, add signature verification in backend.
 - Volumes persist data: survive `docker compose down`, NOT `down -v`.
 - Evolution API image pinned to `v2.2.2` for stability.

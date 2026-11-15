@@ -5,9 +5,13 @@ Uses evolution-whatsapp package for sending/receiving messages.
 Usa o ``AsyncEvoClient``: o request HTTP acontece fora do event loop (obrigatório
 no Cloudflare Workers, que não tolera bloqueio síncrono durante I/O).
 """
+import logging
+
 from evolution_api import AsyncEvoClient, jid
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_evolution_client() -> AsyncEvoClient:
@@ -30,6 +34,15 @@ async def send_whatsapp_message(number: str, message: str) -> dict:
     number: plain digits with country code (e.g. '558897169894'),
             or full group JID ending in '@g.us' (kept as-is).
     """
+    if not settings.outbound_enabled:
+        # Trava do ambiente local: um backend de desenvolvimento não pode
+        # responder na mesma instância/número usado pelo Worker de produção.
+        logger.warning(
+            "Envio WhatsApp bloqueado (ALLOW_OUTBOUND=false, ENVIRONMENT=%s): %s",
+            settings.environment,
+            number,
+        )
+        return {"status": "blocked", "reason": "outbound_disabled"}
     if "@g.us" not in number:
         number = number.split("@")[0]
     client = get_evolution_client()

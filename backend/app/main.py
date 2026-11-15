@@ -36,7 +36,6 @@ from app.services.evolution_client import send_whatsapp_message
 from app.services.forecast import Period, build_period_forecast
 from app.services.persistence import (
     group_active_subscribers_by_city,
-    list_active_groups,
     list_active_subscribers,
     list_groups_with_bulletin_time,
     resolve_group_location,
@@ -330,6 +329,16 @@ async def lifespan(_: FastAPI):
         # No Workers os agendamentos vêm dos Cron Triggers (backend/worker.py)
         # e o ASGI serveria o lifespan a cada request — não iniciamos o
         # APScheduler aqui.
+        yield
+        return
+    if not settings.scheduler_enabled:
+        # Trava do ambiente local: sem jobs agendados por padrão para não
+        # duplicar alertas/boletins do Worker de produção.
+        logger.warning(
+            "APScheduler desabilitado (ENVIRONMENT=%s). "
+            "Defina ENABLE_SCHEDULER=true para rodar jobs locais.",
+            settings.environment,
+        )
         yield
         return
     for warning in settings.production_warnings():

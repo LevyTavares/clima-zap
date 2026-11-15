@@ -56,6 +56,36 @@ def test_cors_respeita_allowlist_e_nao_usa_credenciais(monkeypatch):
     assert "access-control-allow-origin" not in denied.headers
 
 
+def test_scheduler_e_outbound_seguem_ambiente_por_default(monkeypatch):
+    monkeypatch.setattr(settings, "enable_scheduler", None)
+    monkeypatch.setattr(settings, "allow_outbound", None)
+    monkeypatch.setattr(settings, "environment", "development")
+
+    assert settings.scheduler_enabled is False
+    assert settings.outbound_enabled is False
+
+    monkeypatch.setattr(settings, "environment", "production")
+
+    assert settings.scheduler_enabled is True
+    assert settings.outbound_enabled is True
+
+
+def test_scheduler_e_outbound_respeitam_override_explicito(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "enable_scheduler", False)
+    monkeypatch.setattr(settings, "allow_outbound", False)
+
+    assert settings.scheduler_enabled is False
+    assert settings.outbound_enabled is False
+
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "enable_scheduler", True)
+    monkeypatch.setattr(settings, "allow_outbound", True)
+
+    assert settings.scheduler_enabled is True
+    assert settings.outbound_enabled is True
+
+
 def test_production_warnings_silencia_fora_de_producao(monkeypatch):
     monkeypatch.setattr(settings, "environment", "development")
     monkeypatch.setattr(settings, "webhook_auth_token", "")

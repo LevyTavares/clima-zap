@@ -37,12 +37,42 @@ def test_clima_ping_endpoint():
     }
 
 
-def test_scheduled_weather_alerts_hours():
+def test_scheduled_weather_alerts_hours(monkeypatch):
+    monkeypatch.setattr(main_module.settings, "enable_scheduler", True)
+
     with TestClient(app):
         job = scheduler.get_job("scheduled_weather_alerts")
 
         assert job is not None
         assert str(job.trigger.fields[5]) == ",".join(map(str, ALERT_SCHEDULE_HOURS))
+
+
+def test_scheduler_nao_inicia_sem_habilitacao(monkeypatch):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    fresh = AsyncIOScheduler(timezone="America/Fortaleza")
+    monkeypatch.setattr(main_module, "scheduler", fresh)
+    monkeypatch.setattr(main_module.settings, "enable_scheduler", None)
+    monkeypatch.setattr(main_module.settings, "environment", "development")
+
+    with TestClient(app):
+        assert not fresh.running
+        assert not fresh.get_jobs()
+
+
+def test_scheduler_inicia_com_habilitacao_explicita(monkeypatch):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    fresh = AsyncIOScheduler(timezone="America/Fortaleza")
+    monkeypatch.setattr(main_module, "scheduler", fresh)
+    monkeypatch.setattr(main_module.settings, "enable_scheduler", True)
+    monkeypatch.setattr(main_module.settings, "environment", "development")
+
+    with TestClient(app):
+        assert fresh.running
+        assert fresh.get_job("scheduled_weather_alerts") is not None
+
+    assert not fresh.running
 
 
 def test_prune_do_historico_agendado_na_hora_de_manutencao():

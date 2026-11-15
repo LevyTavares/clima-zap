@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # "https://clima-zap.vercel.app"). Vazio = nenhuma origem cross-origin.
     # O curinga `*` é descartado de propósito — veja `parse_cors_origins`.
     cors_origins: str = ""
+    # Travas do ambiente local. None = automático: só habilita em produção.
+    # O Compose de desenvolvimento força ambos como false (ver docker-compose.yml).
+    enable_scheduler: bool | None = None
+    allow_outbound: bool | None = None
 
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV,
@@ -60,6 +64,28 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """True quando ``ENVIRONMENT`` aponta para produção."""
         return self.environment.strip().lower() in ("production", "prod")
+
+    @property
+    def scheduler_enabled(self) -> bool:
+        """Liga o APScheduler apenas em produção, salvo override explícito.
+
+        O backend local em Docker roda com ``ENABLE_SCHEDULER=false`` para não
+        duplicar alertas/boletins disparados pelo Worker de produção.
+        """
+        if self.enable_scheduler is not None:
+            return self.enable_scheduler
+        return self.is_production
+
+    @property
+    def outbound_enabled(self) -> bool:
+        """Permite envios reais ao WhatsApp apenas em produção, salvo override.
+
+        Evita que um backend local conectado à mesma instância da Evolution
+        responda mensagens em paralelo ao Worker de produção.
+        """
+        if self.allow_outbound is not None:
+            return self.allow_outbound
+        return self.is_production
 
     def production_warnings(self) -> list[str]:
         """Configs inseguras que ficaram ativas em produção.
