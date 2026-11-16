@@ -100,6 +100,42 @@ def test_failed_forecast_is_added_to_alert_history(test_database, monkeypatch):
     assert alert_log.recipient == "forecast-group"
 
 
+def test_custom_bulletin_compara_horario_em_brt(test_database, monkeypatch):
+    """`/agendar 06:30` dispara às 06:30 BRT — não às 06:30 UTC (bug do Worker)."""
+
+    async def create_group():
+        async with test_database() as session:
+            session.add(
+                Subscriber(
+                    phone="1203639@g.us",
+                    city="Crato",
+                    is_active=True,
+                    receive_bulletins=True,
+                    bulletin_time="06:30",
+                )
+            )
+            await session.commit()
+
+    asyncio.run(create_group())
+
+    sent = []
+
+    async def fake_build(period, location=None):
+        return f"boletim-{period}"
+
+    async def fake_send(recipient, message):
+        sent.append(recipient)
+        return {"status": "sent"}
+
+    monkeypatch.setattr(main_module, "build_period_forecast", fake_build)
+    monkeypatch.setattr(main_module, "send_whatsapp_message", fake_send)
+    monkeypatch.setattr(main_module, "local_now", lambda: datetime(2026, 11, 15, 6, 30))
+
+    asyncio.run(main_module.send_custom_bulletins())
+
+    assert sent == ["1203639@g.us"]
+
+
 def test_period_forecast_fans_out_to_subscribed_groups(test_database, monkeypatch):
     """Boletim vai para o grupo principal + grupos inscritos, sem duplicar."""
     monkeypatch.setattr(main_module.settings, "forecast_group_jid", "1203630@g.us")

@@ -33,7 +33,7 @@ from app.services.admin_sessions import (
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
-from app.services.forecast import Period, build_period_forecast
+from app.services.forecast import Period, build_period_forecast, local_now
 from app.services.persistence import (
     group_active_subscribers_by_city,
     list_active_subscribers,
@@ -176,9 +176,7 @@ async def _period_for_hour(hour: int) -> Period:
 
 async def send_custom_bulletins() -> None:
     """Envia boletins personalizados dos grupos cujo horário coincide."""
-    from datetime import datetime
-
-    now = datetime.now()
+    now = local_now()
     time_str = now.strftime("%H:%M")
     try:
         groups = await list_groups_with_bulletin_time(time_str)
