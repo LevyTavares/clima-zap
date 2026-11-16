@@ -1,32 +1,25 @@
 """Builders de mensagem de previsão (comandos on-demand e boletim periódico)."""
 
+import asyncio
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from app.api.api import fetch_cariri_weather
+from app.core.clock import local_now
 from app.core.config import settings
 from app.core.location import LocationData
 from app.formatter import (
-    format_daily_summary,
+    format_comparison,
     format_period_summary,
     format_window_summary,
 )
+from app.schemas.schemas import WeatherData
 from app.services.alerts import generate_weather_alerts
 
 logger = logging.getLogger("uvicorn.error")
 
 Period = Literal["morning", "afternoon", "night"]
-
-# America/Fortaleza = UTC-3, sem DST. O Worker roda em UTC: `datetime.now()`
-# cru deslocava janela e período em 3h em produção.
-FORTRALEZA_TZ = timezone(timedelta(hours=-3))
-
-
-def local_now() -> datetime:
-    """Agora em America/Fortaleza, naive (as séries horárias vêm sem tz)."""
-    return datetime.now(timezone.utc).astimezone(FORTRALEZA_TZ).replace(tzinfo=None)
-
 
 # horas locais (America/Fortaleza) de cada período
 PERIOD_HOURS: dict[Period, tuple[int, int]] = {
@@ -35,6 +28,79 @@ PERIOD_HOURS: dict[Period, tuple[int, int]] = {
     "afternoon": (12, 18),
     "night": (18, 6),
 }
+
+
+def _in_window(
+    value: str, now: datetime, cutoff: datetime, step: timedelta
+) -> bool:
+    """O bloco ``value`` (de duração ``step``) intersecta [now, cutoff]?"""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return moment <= cutoff and moment + step > now
+
+
+def _window_values(
+    times: list[str],
+    values: list[float],
+    now: datetime,
+    cutoff: datetime,
+    step: timedelta,
+) -> list[float]:
+    return [
+        value
+        for time_value, value in zip(times, values)
+        if _in_window(time_value, now, cutoff, step)
+    ]
+
+
+def aggregate_window(
+    weather: WeatherData, window_minutes: int, now: datetime
+) -> dict:
+    """Agrega a janela [agora, agora+N] em 15 min (≤4h) ou de hora em hora.
+
+    O bloco do horário corrente entra (antes o filtro ``now <= dt`` o excluía,
+    e a janela de 1h acabava descrevendo só a hora seguinte). Chuva sem dado
+    vira ``None`` — ``rain`` é milímetro, não probabilidade.
+    """
+    cutoff = now + timedelta(minutes=window_minutes)
+    cur = weather.current
+    short = window_minutes <= 240
+    source = weather.minutely_15 if short else weather.hourly
+    if source is None or not source.time:
+        source = weather.hourly
+    step = timedelta(minutes=15) if source is weather.minutely_15 else timedelta(hours=1)
+
+    temps: list[float] = []
+    pops: list[float] = []
+    hums: list[float] = []
+    if source is not None and source.time:
+        temps = _window_values(source.time, source.temperature_2m, now, cutoff, step)
+        pops = _window_values(
+            source.time, source.precipitation_probability, now, cutoff, step
+        )
+        hums = _window_values(
+            source.time, source.relative_humidity_2m, now, cutoff, step
+        )
+
+    # UV não existe no minutely_15: usa o máximo horário da mesma janela.
+    hourly = weather.hourly
+    uvs = (
+        _window_values(
+            hourly.time, hourly.uv_index, now, cutoff, timedelta(hours=1)
+        )
+        if hourly is not None
+        else []
+    )
+
+    return {
+        "temp_min": min(temps) if temps else cur.temperature_2m,
+        "temp_max": max(temps) if temps else cur.temperature_2m,
+        "humidity": int(sum(hums) / len(hums)) if hums else int(cur.relative_humidity_2m),
+        "rain_prob": int(max(pops)) if pops else None,
+        "uv_index": max(uvs) if uvs else cur.uv_index,
+    }
 
 
 async def build_current_forecast(
@@ -48,61 +114,31 @@ async def build_current_forecast(
 
     w = await fetch_cariri_weather(location)
     city = location["name"] if location else settings.default_city
-    cur = w.current
-    now = now or local_now()
-    cutoff = now + timedelta(minutes=window_minutes)
+    agg = aggregate_window(w, window_minutes, now or local_now())
 
-    temps: list[float] = []
-    pops: list[float] = []
-    hums: list[float] = []
-    uvs: list[float] = []
-    if w.hourly is not None and getattr(w.hourly, "time", None):
-        for t, temp, pop, hum, uv in zip(
-            w.hourly.time,
-            w.hourly.temperature_2m or [],
-            w.hourly.precipitation_probability or [],
-            w.hourly.relative_humidity_2m or [],
-            w.hourly.uv_index or [],
-        ):
-            try:
-                dt = datetime.fromisoformat(t)
-            except ValueError:
-                continue
-            if now <= dt <= cutoff:
-                temps.append(temp)
-                pops.append(pop)
-                hums.append(hum)
-                uvs.append(uv)
-
-    if temps:
-        temp_min = min(temps)
-        temp_max = max(temps)
-        rain_prob = int(max(pops)) if pops else int(cur.rain * 100)
-        humidity = int(sum(hums) / len(hums)) if hums else int(cur.relative_humidity_2m)
-        uv_index = max(uvs) if uvs else cur.uv_index
-    else:
-        temp_min = temp_max = cur.temperature_2m
-        rain_prob = int(cur.rain * 100)
-        humidity = int(cur.relative_humidity_2m)
-        uv_index = cur.uv_index
-
-    summary = format_window_summary(
-        city=city,
-        temp_min=temp_min,
-        temp_max=temp_max,
-        humidity=humidity,
-        uv_index=uv_index,
-        rain_prob=rain_prob,
-        window_minutes=window_minutes,
-    )
+    summary = format_window_summary(city=city, window_minutes=window_minutes, **agg)
     alerts = generate_weather_alerts(
-        uv_index=uv_index,
-        humidity=humidity,
-        rain_prob=rain_prob,
+        uv_index=agg["uv_index"],
+        humidity=agg["humidity"],
+        rain_prob=agg["rain_prob"],
     )
     if alerts:
         summary += "\n\n" + "\n".join(alerts)
     return summary
+
+
+async def build_comparison(
+    locations: list[LocationData], window_minutes: int | None = None
+) -> str:
+    """Comparativo compacto (uma linha por cidade) das janelas simultâneas."""
+    window = window_minutes or settings.forecast_window_minutes
+    now = local_now()
+    weathers = await asyncio.gather(*(fetch_cariri_weather(loc) for loc in locations))
+    rows = [
+        {"city": loc["name"], **aggregate_window(w, window, now)}
+        for loc, w in zip(locations, weathers)
+    ]
+    return format_comparison(rows, window)
 
 
 def _period_date_ranges(period: Period, today: date) -> list[tuple[date, int, int]]:

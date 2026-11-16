@@ -1,26 +1,13 @@
+"""Formatadores de mensagem para WhatsApp.
+
+Um único conjunto de peças (faixa de temperatura, linha de UV, dica de saúde)
+usado pelos três formatos — janela on-demand, período e comparativo — para
+tom e precisão não divergirem entre eles.
+"""
 
 import random
-from datetime import datetime
 
-
-def time_greeting() -> str:
-    """Saudação baseada na hora do dia."""
-    hour = datetime.now().hour
-    if 5 <= hour < 12:
-        return "Bom dia! ☀️"
-    if 12 <= hour < 18:
-        return "Boa tarde! 🌤️"
-    return "Boa noite! 🌙"
-
-def get_greeting() -> str:
-    """Retorna uma saudação amigável e variada."""
-    greetings = [
-        "Como vão pessoal? 🌵",
-        "E aí, como estamos hoje? ☀️",
-        "Passando com as atualizações do clima! 🌤️",
-        "Olá! Aqui é o seu boletim diário do Clima-Zap 📱"
-    ]
-    return random.choice(greetings)
+from app.core.clock import local_now
 
 PERIOD_GREETINGS = {
     "morning": [
@@ -81,6 +68,16 @@ WEATHER_CODE_TEXT = {
 }
 
 
+def time_greeting() -> str:
+    """Saudação baseada na hora local (America/Fortaleza)."""
+    hour = local_now().hour
+    if 5 <= hour < 12:
+        return "Bom dia! ☀️"
+    if 12 <= hour < 18:
+        return "Boa tarde! 🌤️"
+    return "Boa noite! 🌙"
+
+
 def get_period_greeting(period: str) -> str:
     return random.choice(PERIOD_GREETINGS.get(period, PERIOD_GREETINGS["morning"]))
 
@@ -89,50 +86,67 @@ def weather_code_to_text(code: int) -> str:
     return WEATHER_CODE_TEXT.get(code, f"Código {code}")
 
 
+def _window_label(minutes: int) -> str:
+    """60/120/180/240 → 1h/2h/3h/4h; valores quebrados ficam em minutos."""
+    return f"{minutes // 60}h" if minutes % 60 == 0 else f"{minutes} min"
+
+
+def _temp_range(temp_min: float, temp_max: float, decimals: int = 1) -> str:
+    """Faixa de temperatura; um único valor quando não há variação."""
+    if temp_min == temp_max:
+        return f"{temp_min:.{decimals}f}°C"
+    return f"{temp_min:.{decimals}f}°C a {temp_max:.{decimals}f}°C"
+
+
+def _uv_line(uv_index: float) -> str:
+    if uv_index <= 0:
+        return "🌙 *Índice UV (máx.):* 0.0 (_Sem sol agora_)"
+    icon = "☀️" if uv_index < 6 else "🧴"
+    note = "(_Muito Alto! Proteja-se do sol_)" if uv_index >= 8 else "(_Tranquilo_)"
+    return f"{icon} *Índice UV (máx.):* {uv_index:.1f} {note}"
+
+
+def _health_tip(uv_index: float, humidity: float, rain_prob: float | None) -> str:
+    """Dica única, na ordem chuva → umidade → UV → clima agradável."""
+    if rain_prob is not None and rain_prob >= 70:
+        return "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
+    if humidity <= 30:
+        return "_Dica: Umidade de deserto! Beba água e evite o sol entre 10h e 16h._ 🚰"
+    if uv_index >= 8:
+        return "_Dica: Sol muito forte! Protetor solar e óculos não podem faltar._ 😎"
+    return "_Dica: Clima agradável por aí! Aproveite._ 🍃"
+
+
 def format_period_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     city: str,
     period: str,
     temp_min: float,
     temp_max: float,
     humidity_avg: int,
-    rain_prob_max: int,
+    rain_prob_max: int | None,
     uv_max: float,
     weather_codes: list[int],
 ) -> str:
     """Mensagem de boletim por período (manhã/tarde/noite) para WhatsApp."""
-    uv_alert = "☀️" if uv_max < 6 else "🧴"
-    uv_text = f"{uv_alert} *Índice UV (pico):* {uv_max} "
-    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_max >= 8 else "(_Tranquilo_)"
-
-    # condição predominante = código mais frequente
     condition = weather_code_to_text(
         max(set(weather_codes), key=weather_codes.count) if weather_codes else 0
     )
-
-    if rain_prob_max >= 70:
-        health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
-    elif uv_max >= 8:
-        health_tip = "_Dica: Sol muito forte! Protetor solar e óculos não podem faltar._ 😎"
-    elif humidity_avg <= 30:
-        health_tip = "_Dica: Umidade baixa, então beba bastante água._ 🚰"
-    else:
-        health_tip = "_Dica: Clima agradável, aproveite ao ar livre!_ 🍃"
-
-    label = PERIOD_LABELS.get(period, period)
-    window = PERIOD_WINDOWS.get(period, "")
-    greeting = get_period_greeting(period)
+    rain_text = (
+        "—" if rain_prob_max is None else f"{rain_prob_max:.0f}%"
+    )
 
     return (
-        f"{greeting}\n\n"
-        f"📍 *Previsão {label} — {city}*\n"
-        f"🕐 Janela: {window}\n"
+        f"{get_period_greeting(period)}\n\n"
+        f"📍 *Previsão {PERIOD_LABELS.get(period, period)} — {city}*\n"
+        f"🕐 Janela: {PERIOD_WINDOWS.get(period, '')}\n"
         f"🌤️ *Condição:* {condition}\n\n"
-        f"🌡️ *Temperatura:* {temp_min:.0f}°C a {temp_max:.0f}°C\n"
+        f"🌡️ *Temperatura:* {_temp_range(temp_min, temp_max, decimals=0)}\n"
         f"💧 *Umidade (média):* {humidity_avg}%\n"
-        f"🌧️ *Chance de Chuva (pico):* {rain_prob_max:.0f}%\n"
-        f"{uv_text}\n\n"
-        f"{health_tip}"
+        f"🌧️ *Chance de Chuva (pico):* {rain_text}\n"
+        f"{_uv_line(uv_max)}\n\n"
+        f"{_health_tip(uv_max, humidity_avg, rain_prob_max)}"
     )
+
 
 def format_window_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     city: str,
@@ -140,105 +154,36 @@ def format_window_summary(  # pylint: disable=too-many-arguments,too-many-positi
     temp_max: float,
     humidity: int,
     uv_index: float,
-    rain_prob: int,
+    rain_prob: int | None,
     window_minutes: int = 60,
 ) -> str:
     """Resumo da previsão para a janela (em minutos) a partir de agora."""
-    uv_alert = "☀️" if uv_index < 6 else "🧴"
-    uv_text = f"{uv_alert} *Índice UV:* {uv_index} "
-    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_index >= 8 else "(_Tranquilo_)"
+    rain_text = "—" if rain_prob is None else f"{rain_prob}%"
 
-    health_tip = ""
-    if humidity <= 30:
-        health_tip = "_Dica: A umidade está de deserto hoje! Beba muita água e evite exposição ao sol entre 10h e 16h._ 🚰"
-    elif rain_prob >= 70:
-        health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair para não ser pego de surpresa._ ☂️"
-    elif uv_index >= 8:
-        health_tip = "_Dica: O sol está rachando! Não saia de casa sem protetor solar e óculos escuros._ 😎"
-    else:
-        health_tip = "_Dica: Clima agradável, aproveite o dia!_ 🍃"
-
-    greeting = time_greeting()
-
-    if temp_min == temp_max:
-        temp_text = f"{temp_min:.1f}°C"
-    else:
-        temp_text = f"{temp_min:.1f}°C a {temp_max:.1f}°C"
-
-    message = (
-        f"{greeting}\n\n"
-        f"📍 *Previsão para {city} — próximos {window_minutes} min*\n\n"
-        f"🌡️ *Temperatura:* {temp_text}\n"
-        f"💧 *Umidade:* {humidity}%\n"
-        f"🌧️ *Chance de Chuva:* {rain_prob}%\n"
-        f"{uv_text}\n\n"
-        f"{health_tip}"
+    return (
+        f"{time_greeting()}\n\n"
+        f"📍 *Previsão para {city} — próximos {_window_label(window_minutes)}*\n\n"
+        f"🌡️ *Temperatura:* {_temp_range(temp_min, temp_max)}\n"
+        f"💧 *Umidade (média):* {humidity}%\n"
+        f"🌧️ *Chance de Chuva (pico):* {rain_text}\n"
+        f"{_uv_line(uv_index)}\n\n"
+        f"{_health_tip(uv_index, humidity, rain_prob)}"
     )
-    return message
 
 
-def format_daily_summary(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-    city: str,
-    temp_min: float,
-    temp_max: float,
-    humidity: int,
-    uv_index: float,
-    rain_prob: int,
-) -> str:
-    """
-    Gera a mensagem de resumo diário formatada para o WhatsApp.
-    """
-    # Lógica de Ícones e Alertas de UV
-    uv_alert = "☀️" if uv_index < 6 else "🧴"
-    uv_text = f"{uv_alert} *Índice UV:* {uv_index} "
-    uv_text += "(_Muito Alto! Proteja-se do sol_)" if uv_index >= 8 else "(_Tranquilo_)"
-
-    # Lógica de Dicas de Saúde e Rotina (Foco no clima regional)
-    health_tip = ""
-    if humidity <= 30:
-        health_tip = "_Dica: A umidade está de deserto hoje! Beba muita água e evite exposição ao sol entre 10h e 16h._ 🚰"
-    elif rain_prob >= 70:
-        health_tip = "_Dica: Tempo fechado! Leve o guarda-chuva se for sair para não ser pego de surpresa._ ☂️"
-    elif uv_index >= 8:
-        health_tip = "_Dica: O sol está rachando! Não saia de casa sem protetor solar e óculos escuros._ 😎"
-    else:
-        health_tip = "_Dica: Clima agradável hoje, aproveite o dia!_ 🍃"
-
-    greeting = time_greeting()
-
-    # Montagem final usando f-strings e formatação do WhatsApp (*negrito*, _itálico_)
-    message = (
-        f"{greeting}\n\n"
-        f"📍 *Previsão para {city}*\n\n"
-        f"🌡️ *Temperatura:* {temp_min}°C a {temp_max}°C\n"
-        f"💧 *Umidade:* {humidity}%\n"
-        f"🌧️ *Chance de Chuva:* {rain_prob}%\n"
-        f"{uv_text}\n\n"
-        f"{health_tip}"
+def format_comparison(rows: list[dict], window_minutes: int) -> str:
+    """Comparativo compacto: uma linha por cidade (temp/umidade/chuva/UV)."""
+    numbers = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣")
+    lines = []
+    for index, row in enumerate(rows):
+        icon = numbers[index] if index < len(numbers) else "▫️"
+        rain = "—" if row["rain_prob"] is None else f"{row['rain_prob']}%"
+        lines.append(
+            f"{icon} *{row['city']}*: "
+            f"{_temp_range(row['temp_min'], row['temp_max'])} · "
+            f"💧 {row['humidity']}% · 🌧️ {rain} · UV {row['uv_index']:.1f}"
+        )
+    return (
+        f"📊 *Comparativo — próximos {_window_label(window_minutes)}*\n\n"
+        + "\n".join(lines)
     )
-    
-    return message
-
-def format_urgent_alert(city: str, alert_type: str, severity: str, value: str, recommendation: str) -> str:
-    """
-    Gera mensagens de alertas urgentes para situações extremas.
-    """
-    # Define o ícone de cabeçalho baseado na gravidade/tipo
-    icon = "⚠️"
-    if "chuva" in alert_type.lower() or "tempestade" in alert_type.lower():
-        icon = "⛈️"
-    elif "seco" in alert_type.lower() or "umidade" in alert_type.lower():
-        icon = "🏜️"
-    elif "calor" in alert_type.lower() or "uv" in alert_type.lower():
-        icon = "🔥"
-
-    message = (
-        f"🚨 *ALERTA CLIMA-ZAP: {city.upper()}* 🚨\n\n"
-        f"{icon} *Aviso:* {alert_type}\n"
-        f"🔴 *Nível:* {severity}\n"
-        f"📊 *Condição Atual:* {value}\n\n"
-        f"🛡️ *O que fazer:*\n"
-        f"_{recommendation}_"
-    )
-    
-    return message

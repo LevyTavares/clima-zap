@@ -1,5 +1,3 @@
-# pylint: disable=duplicate-code,broad-exception-caught,line-too-long,missing-module-docstring,missing-function-docstring,too-many-branches,too-many-return-statements,too-many-locals,too-many-statements,raise-missing-from,unused-argument,redefined-outer-name,reimported,unused-import,possibly-used-before-assignment
-import asyncio
 import logging
 import secrets
 from functools import partial
@@ -15,7 +13,6 @@ from app.core.location import (
     CITY_OPTIONS,
     CRAJUBAR_LOCATIONS,
     LocationData,
-    NUMERIC_CITY_MAP,
     match_city,
     parse_coordinates,
 )
@@ -24,7 +21,7 @@ from app.services.admin_commands import handle_admin_command
 from app.services.bot_menu import get_help_message
 from app.services.command_parser import parse_invocation
 from app.services.evolution_client import send_whatsapp_message
-from app.services.forecast import build_current_forecast
+from app.services.forecast import build_comparison, build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
@@ -207,28 +204,20 @@ async def handle_config_command(args: str, recipient: str) -> str:
 
 
 async def handle_comparar_command(recipient: str = "") -> str:
-    """Comando `/comparar`: previsão simultânea das 3 cidades do Crajubar."""
+    """Comando `/comparar`: tabela compacta das 3 cidades do Crajubar."""
     try:
-        window = await get_subscriber_window(recipient) if recipient else None
-        locs = [
-            match_city("barbalha"),
-            match_city("juazeiro do norte"),
-            match_city("crato"),
+        locations = [
+            location
+            for location in (
+                match_city("barbalha"),
+                match_city("juazeiro do norte"),
+                match_city("crato"),
+            )
+            if location is not None
         ]
-        forecasts = await asyncio.gather(
-            *[
-                build_current_forecast(loc, window)
-                for loc in locs
-                if loc is not None
-            ]
-        )
-        return (
-            "📊 *Comparativo Regional - Crajubar*\n\n"
-            f"1️⃣ {forecasts[0]}\n\n"
-            f"2️⃣ {forecasts[1]}\n\n"
-            f"3️⃣ {forecasts[2]}"
-        )
-    except Exception as exc:
+        window = await get_subscriber_window(recipient)
+        return await build_comparison(locations, window)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("Erro ao comparar regiões: %s", exc)
         return FORECAST_ERROR_TEXT
 
@@ -249,7 +238,9 @@ async def handle_status_command() -> str:
     )
 
 
-async def handle_agendar_command(recipient: str, args: str = "") -> str:
+async def handle_agendar_command(  # pylint: disable=too-many-return-statements
+    recipient: str, args: str = ""
+) -> str:
     """Agenda um boletim personalizado para o grupo (formato HH:MM)."""
     from app.services.persistence import set_bulletin_time
 
@@ -302,19 +293,34 @@ WINDOW_OPTIONS = {"1h": 60, "2h": 120, "3h": 180, "4h": 240}
 
 
 async def handle_window_command(args: str, recipient: str) -> str:
-    """Comando `/janela [1h|2h|3h|4h]` — janela da previsão on-demand."""
+    """Comando `/janela [1h|2h|3h|4h|padrao]` — janela da previsão on-demand."""
     query = args.strip().lower()
     options = " · ".join(f"*{key}*" for key in WINDOW_OPTIONS)
+    commands = f"{options} ou *padrao* (ex: ```/janela 2h```)"
     if not query:
         return (
             f"⏱️ Janela atual: *{await get_subscriber_window(recipient)} min*\n"
-            f"Opções: {options} (ex: ```/janela 2h```)."
+            f"Opções: {commands}."
+        )
+    if query in ("padrao", "padrão", "reset"):
+        await set_subscriber_window(recipient, None)
+        return (
+            "✅ Janela da previsão voltou ao padrão "
+            f"(*{settings.forecast_window_minutes} min*)."
         )
     minutes = WINDOW_OPTIONS.get(query)
     if minutes is None:
-        return f"❌ Janela inválida. Opções: {options} (ex: ```/janela 2h```)."
+        return f"❌ Janela inválida. Opções: {commands}."
     await set_subscriber_window(recipient, minutes)
-    return f"✅ Janela da previsão definida para *{minutes} min*."
+    group_note = (
+        "\n⚠️ Em grupo, a janela vale para todos os membros."
+        if recipient.endswith("@g.us")
+        else ""
+    )
+    return (
+        f"✅ Janela da previsão definida para *{minutes} min* "
+        f"(vale para /clima e /comparar).{group_note}"
+    )
 
 
 async def handle_forecast_command(recipient: str) -> str:
@@ -336,7 +342,9 @@ async def handle_non_command(recipient: str) -> str | None:
     return HINT_TEXT
 
 
-async def route_command(command: str, args: str, recipient: str) -> str:
+async def route_command(  # pylint: disable=too-many-return-statements
+    command: str, args: str, recipient: str
+) -> str:
     """Roteia o comando já parseado (ver command_parser) e retorna a resposta."""
     if command in ("help", "?", "comandos", "ajuda"):
         return get_help_message()
@@ -379,7 +387,9 @@ def normalize_event(event: str) -> str:
     return event.strip().lower().replace("-", "_").replace(".", "_")
 
 
-async def process_event_background(payload: WebhookPayload):
+async def process_event_background(  # pylint: disable=too-many-locals,too-many-branches,too-many-return-statements
+    payload: WebhookPayload,
+):
     """Process incoming Evolution API webhook event."""
     logger.info("Evento recebido: %s | Instância: %s", payload.event, payload.instance)
 

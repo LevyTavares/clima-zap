@@ -39,6 +39,8 @@ async def fetch_cariri_weather(location: LocationData | None = None) -> WeatherD
         "current": "temperature_2m,relative_humidity_2m,rain,uv_index",
         "daily": "temperature_2m_max,temperature_2m_min",
         "hourly": "temperature_2m,precipitation_probability,relative_humidity_2m,uv_index,weather_code",
+        # Janelas curtas (<= 4h) precisam de grão de 15 min; UV só existe no hourly.
+        "minutely_15": "temperature_2m,precipitation_probability,relative_humidity_2m,weather_code",
         "forecast_days": "2",
         "timezone": "America/Fortaleza"
     }

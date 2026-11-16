@@ -2,11 +2,23 @@ from datetime import datetime, timedelta
 
 import asyncio
 
-from app.formatter import format_period_summary, get_period_greeting, weather_code_to_text
-from app.schemas.schemas import CurrentWeather, DailyWeather, HourlyWeather, WeatherData
+from app.formatter import (
+    format_period_summary,
+    format_window_summary,
+    get_period_greeting,
+    weather_code_to_text,
+)
+from app.schemas.schemas import (
+    CurrentWeather,
+    DailyWeather,
+    HourlyWeather,
+    MinutelyWeather,
+    WeatherData,
+)
 from app.services.forecast import (
     PERIOD_HOURS,
     aggregate_period_hourly,
+    build_comparison,
     build_current_forecast,
     build_period_forecast,
 )
@@ -192,9 +204,115 @@ def test_build_current_forecast_janela_e_formato(monkeypatch):
     now = datetime(2026, 9, 23, 13, 10)
 
     uma_hora = asyncio.run(build_current_forecast(now=now, window_minutes=60))
-    # 13:10 → 14:10: só o ponto das 14h cai na janela → valor único, sem "a"
-    assert "Temperatura:* 34.0°C\n" in uma_hora
+    # 13:10 → 14:10: horas 13h e 14h intersectam a janela (33 e 34) —
+    # o bloco corrente entra: antes o filtro `now <= dt` o descartava.
+    assert "Temperatura:* 33.0°C a 34.0°C\n" in uma_hora
 
     quatro_horas = asyncio.run(build_current_forecast(now=now, window_minutes=240))
-    # 13:10 → 17:10: pontos 14..17h (34, 20, 21, 22) → faixa real
+    # 13:10 → 17:10: pontos 13..17h (33, 34, 20, 21, 22) → faixa real
     assert "Temperatura:* 20.0°C a 34.0°C" in quatro_horas
+
+
+def _minutely_fixture() -> MinutelyWeather:
+    """Blocos de 15 min a partir das 13:00: 30..33, depois 20..23."""
+    base = datetime(2026, 9, 23, 13, 0)
+    temps = [30.0, 31.0, 32.0, 33.0, 20.0, 21.0, 22.0, 23.0]
+    return MinutelyWeather(
+        time=[(base + timedelta(minutes=15 * i)).isoformat() for i in range(8)],
+        temperature_2m=temps,
+        precipitation_probability=[10.0, 20.0, 30.0, 40.0, 90.0, 80.0, 70.0, 60.0],
+        relative_humidity_2m=[50.0] * 8,
+        weather_code=[1] * 8,
+    )
+
+
+def test_janela_curta_usa_minutely_15(monkeypatch):
+    async def mock_fetch(_location=None):
+        return WeatherData(
+            latitude=-7.31,
+            longitude=-39.31,
+            current=CurrentWeather(
+                temperature_2m=30.0, relative_humidity_2m=40, rain=0, uv_index=5
+            ),
+            hourly=_hourly_fixture(),
+            minutely_15=_minutely_fixture(),
+        )
+
+    monkeypatch.setattr("app.services.forecast.fetch_cariri_weather", mock_fetch)
+    msg = asyncio.run(
+        build_current_forecast(now=datetime(2026, 9, 23, 13, 10), window_minutes=60)
+    )
+
+    # 13:10 → 14:10 em blocos de 15 min: 30..33 e 20 → variação dentro da hora
+    assert "Temperatura:* 20.0°C a 33.0°C" in msg
+    assert "Chance de Chuva (pico):* 90%" in msg
+
+
+def test_chuva_desconhecida_mostra_travessao(monkeypatch):
+    async def mock_fetch(_location=None):
+        return WeatherData(
+            latitude=-7.31,
+            longitude=-39.31,
+            current=CurrentWeather(
+                temperature_2m=30.0, relative_humidity_2m=40, rain=3.0, uv_index=5
+            ),
+        )
+
+    monkeypatch.setattr("app.services.forecast.fetch_cariri_weather", mock_fetch)
+    msg = asyncio.run(build_current_forecast(now=datetime(2026, 9, 23, 13, 10)))
+
+    # rain é milímetro: sem série de chuva a chance é desconhecida, não 300%
+    assert "Chance de Chuva (pico):* —" in msg
+
+
+def test_formato_da_mensagem_do_clima_e_estavel(monkeypatch):
+    """Contrato do texto: mudanças de tom/precisão passam a quebrar o teste."""
+    monkeypatch.setattr("app.formatter.local_now", lambda: datetime(2026, 9, 23, 13, 0))
+
+    msg = format_window_summary(
+        city="Crato",
+        temp_min=30.0,
+        temp_max=33.0,
+        humidity=45,
+        uv_index=9.0,
+        rain_prob=80,
+        window_minutes=120,
+    )
+
+    assert msg == (
+        "Boa tarde! 🌤️\n\n"
+        "📍 *Previsão para Crato — próximos 2h*\n\n"
+        "🌡️ *Temperatura:* 30.0°C a 33.0°C\n"
+        "💧 *Umidade (média):* 45%\n"
+        "🌧️ *Chance de Chuva (pico):* 80%\n"
+        "🧴 *Índice UV (máx.):* 9.0 (_Muito Alto! Proteja-se do sol_)\n\n"
+        "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
+    )
+
+
+def test_build_comparison_uma_linha_por_cidade(monkeypatch):
+    seen = []
+
+    async def mock_fetch(location=None):
+        seen.append(location["name"])
+        return WeatherData(
+            latitude=-7.31,
+            longitude=-39.31,
+            current=CurrentWeather(
+                temperature_2m=30.0, relative_humidity_2m=40, rain=0, uv_index=5
+            ),
+            hourly=_hourly_fixture(),
+        )
+
+    monkeypatch.setattr("app.services.forecast.fetch_cariri_weather", mock_fetch)
+    locations = [
+        {"name": "Barbalha", "latitude": -7.31, "longitude": -39.3},
+        {"name": "Crato", "latitude": -7.23, "longitude": -39.4},
+    ]
+    msg = asyncio.run(build_comparison(locations, 120))
+
+    assert seen == ["Barbalha", "Crato"]
+    assert "Comparativo — próximos 2h" in msg
+    assert "*Barbalha*:" in msg and "*Crato*:" in msg
+    # compacto: sem saudação e sem dica por cidade
+    assert "Boa " not in msg and "_Dica:" not in msg

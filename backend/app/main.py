@@ -33,7 +33,8 @@ from app.services.admin_sessions import (
 from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
-from app.services.forecast import Period, build_period_forecast, local_now
+from app.core.clock import local_now
+from app.services.forecast import Period, build_period_forecast
 from app.services.persistence import (
     group_active_subscribers_by_city,
     list_active_subscribers,
@@ -166,7 +167,7 @@ async def _bulletin_targets() -> list[tuple[str, LocationData | None]]:
     return targets
 
 
-async def _period_for_hour(hour: int) -> Period:
+def _period_for_hour(hour: int) -> Period:
     if hour < 12:
         return "morning"
     if hour < 18:

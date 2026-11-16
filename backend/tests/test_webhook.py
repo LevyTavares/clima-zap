@@ -1,4 +1,3 @@
-# pylint: disable=unused-import
 """Testes da gramática do bot no webhook, do roteador e da autenticação.
 
 Comandos só valem como ``/comando`` ou ``@clima-zap comando`` (ver
@@ -242,6 +241,27 @@ def test_janela_mostra_padrao_e_define(test_database):
 
     assert "Janela inválida" in run_command("/janela 5h")
     assert run(get_subscriber_window(RECIPIENT)) == 120
+
+    assert "60 min" in run_command("/janela padrao")
+    assert run(get_subscriber_window(RECIPIENT)) == 60
+
+
+def test_comparar_usa_a_janela_e_uma_linha_por_cidade(test_database, monkeypatch):
+    seen = {}
+
+    async def fake_comparison(locations, window_minutes=None):
+        seen["cities"] = [location["name"] for location in locations]
+        seen["window"] = window_minutes
+        return "comparativo-compacto"
+
+    monkeypatch.setattr("app.api.webhook.build_comparison", fake_comparison)
+
+    run_command("/janela 4h")
+    assert run_command("/comparar") == "comparativo-compacto"
+    assert seen == {
+        "cities": ["Barbalha", "Juazeiro do Norte", "Crato"],
+        "window": 240,
+    }
 
 
 def test_clima_usa_a_janela_escolhida(test_database, monkeypatch):

@@ -22,6 +22,15 @@ class HourlyWeather(BaseModel):
     uv_index: list[float] = []
     weather_code: list[int] = []
 
+# Série de 15 min (minutely_15 do Open-Meteo) — usada nas janelas <= 4h.
+# UV não existe nessa resolução: vem do hourly.
+class MinutelyWeather(BaseModel):
+    time: list[str] = []
+    temperature_2m: list[float] = []
+    precipitation_probability: list[float] = []
+    relative_humidity_2m: list[float] = []
+    weather_code: list[int] = []
+
 # Modelo principal que engloba a resposta da API do Open-Meteo
 class WeatherData(BaseModel):
     latitude: float
@@ -29,3 +38,4 @@ class WeatherData(BaseModel):
     current: CurrentWeather
     daily: Optional[DailyWeather] = None
     hourly: Optional[HourlyWeather] = None
+    minutely_15: Optional[MinutelyWeather] = None

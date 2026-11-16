@@ -33,7 +33,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Motor de regras preventivas** — UV ≥ 8.0, umidade ≤ 30%, chuva ≥ 70% — aplicado no endpoint, nos jobs agendados e no comando `/clima`, com texto em Markdown de WhatsApp
 - **Local por assinante**: presets do Crajubar (Barbalha, Juazeiro do Norte, Crato por nome, número ou emoji), qualquer cidade pelo geocoder da Open-Meteo, coordenadas `lat,lon`, localização GPS (opt-in, ver abaixo), e `/configuracao padrao` para voltar à região padrão
 - **`/comparar`** — previsão simultânea das 3 cidades do Crajubar em uma única mensagem (builds em paralelo)
-- **Janela configurável** com `/janela` (`1h`, `2h`, `3h`, `4h`): vale para `/clima` e `/comparar` do contato; sem escolha, usa `FORECAST_WINDOW_MINUTES` (60 min). Quando a janela tem um único ponto horário, a mensagem mostra um valor único em vez de uma faixa repetida
+- **Janela configurável** com `/janela` (`1h`, `2h`, `3h`, `4h` ou `padrao`): vale para `/clima` e `/comparar` do contato; sem escolha, usa `FORECAST_WINDOW_MINUTES` (60 min). Janelas de até 4h usam a série de 15 min da Open-Meteo (`minutely_15`), incluindo o bloco do horário corrente — quando não há variação real, a mensagem mostra um valor único em vez de uma faixa repetida
 - **Cache em memória por local** (10 min) nas consultas à Open-Meteo
 
 ### 💬 Bot de WhatsApp
@@ -485,8 +485,8 @@ Os comandos valem em **duas formas de invocação**:
 | `/configuracao <lat,lon>` | Define por coordenadas (ex: `/configuracao -7.23, -39.31`) |
 | `/configuracao padrao` | Remove o local e volta à região padrão |
 | `/cidade <nome>` | Atalho de `/configuracao` para cidades |
-| `/comparar`, `/crajubar` | Previsão das 3 cidades do Crajubar (Barbalha, Juazeiro do Norte, Crato) na mesma mensagem |
-| `/janela [1h\|2h\|3h\|4h]` | Janela da previsão on-demand do contato (sem argumento mostra a atual; padrão `1h`) |
+| `/comparar`, `/crajubar` | Tabela compacta (uma linha por cidade) com Barbalha, Juazeiro do Norte e Crato na janela escolhida |
+| `/janela [1h\|2h\|3h\|4h\|padrao]` | Janela da previsão on-demand do contato (sem argumento mostra a atual; `padrao` volta a `FORECAST_WINDOW_MINUTES`) |
 | `/inscrever [alertas\|boletins\|todos]` | Ativa o envio de alertas climáticos e/ou boletins (padrão: todos) |
 | `/sair [alertas\|boletins\|todos]` | Cancela a inscrição nos tipos informados |
 | `/agendar HH:MM` · `/agendar off` | (Grupos) agenda/desativa o boletim personalizado do grupo |
@@ -668,7 +668,7 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_webhook.py` | 25 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/comparar`, `/janela`, `/inscrever`, `/sair`, `/clima`), janela escolhida chegando ao builder, `extract_location`, aguardo de GPS (pin só vale após `/configuracao gps`, expira em 2 min), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
+| `tests/test_webhook.py` | 34 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/comparar`, `/janela`, `/inscrever`, `/sair`, `/clima`), janela escolhida chegando aos builders de `/clima` e `/comparar` (`/janela padrao` volta ao default), `extract_location`, aguardo de GPS (pin só vale após `/configuracao gps`, expira em 2 min), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
 | `tests/test_d1_store.py` | 26 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, janela da previsão, dedupe, dica), alert history, sessões administrativas e conversão FFI |
 | `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
 | `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |
@@ -676,8 +676,8 @@ Testes da suíte principal:
 | `tests/test_config.py` | 10 | Travas de configuração: CORS por allowlist (curinga ignorado, sem credenciais, lido por request), `ENABLE_SCHEDULER`/`ALLOW_OUTBOUND` e avisos `production_warnings` de defaults inseguros (inclui `ADMIN_PASSWORD` curta) |
 | `tests/test_evolution_client.py` | 3 | Trava de envio: bloqueado por padrão fora de produção, liberado em produção e com opt-in explícito |
 | `tests/test_schedule.py` | 10 | Agendamento compartilhado: sorteio do jitter dentro do wall time do Cron Trigger, despacho por expressão de cron (sem duplicar em 06h/14h), cron de sessão admin, crons do `wrangler.jsonc` espelhando as constantes e horas UTC→BRT |
-| `tests/test_forecast.py` | 9 | Agregação por período (manhã/tarde/noite), seleção da janela on-demand (1h..4h, valor único sem faixa degenerada), formatação, builders on-demand e periódico |
-| `tests/test_persistence.py` | 8 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), dica única e agrupamento de alertas |
+| `tests/test_forecast.py` | 14 | Agregação por período (manhã/tarde/noite), janela on-demand em série de 15 min (`minutely_15`) com fallback horário incluindo o bloco corrente, chuva desconhecida como `—` (nunca mm→%), comparativo compacto, contrato do texto da mensagem e builders |
+| `tests/test_persistence.py` | 12 | Persistência/reativação de assinante, histórico de envio, localização (`/configuracao`), boletim personalizado no horário BRT, dica única e agrupamento de alertas |
 | `tests/test_alerts.py` | 5 | Regras de UV, umidade, chuva, múltiplas e nenhuma |
 | `tests/test_location.py` | 4 | Presets do Crajubar, fallback de cidade e parsing de `lat,lon` |
 | `tests/test_command_parser.py` | 4 | Gramática de invocação: `/cmd`, `@clima-zap cmd`, menção nativa e texto solto |

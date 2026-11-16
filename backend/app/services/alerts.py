@@ -1,4 +1,6 @@
-def generate_weather_alerts(uv_index: float, humidity: float, rain_prob: float) -> list[str]:
+def generate_weather_alerts(
+    uv_index: float, humidity: float, rain_prob: float | None
+) -> list[str]:
     """
     Gera mensagens de alerta com base nos limiares metereológicos preventivos.
     """
@@ -13,7 +15,7 @@ def generate_weather_alerts(uv_index: float, humidity: float, rain_prob: float) 
         alerts.append("⚠️ *Alerta de Umidade Baixa:* Umidade relativa do ar crítica (≤ 30%). Mantenha-se hidratado e evite exposição ao sol.")
 
     # Regra 3: Probabilidade de Chuva >= 70% (Atenção a alagamentos)
-    if rain_prob >= 70.0:
+    if rain_prob is not None and rain_prob >= 70.0:
         alerts.append("🌧️ *Alerta de Chuva Forte:* Probabilidade de chuva alta (≥ 70%). Atenção a pontos de alagamento nas vias.")
 
     return alerts
