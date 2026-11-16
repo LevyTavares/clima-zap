@@ -40,7 +40,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 ### 💬 Bot de WhatsApp
 
 - **Gramática estrita**: comandos só valem como `/comando` ou `@clima-zap comando` (nome de `BOT_NAME`, ou menção nativa com `TARGET_PHONE_NUMBER`); em grupo o bot fica calado fora de comandos, no privado envia uma dica única de `/ajuda`
-- **Comandos**: `/ajuda`, `/status`, `/clima` (aliases `forecast`/`previsao`/…), `/configurar` (aliases `configuracao`/`cidade`), `/comparar`, `/inscrever`, `/sair`, `/agendar` — ver [tabela](#comandos-suportados)
+- **Comandos**: `/ajuda`, `/status`, `/clima` (aliases `forecast`/`previsao`/…), `/configurar` (aliases `configuracao`/`cidade`), `/comparar`, `/inscrever`, `/cancelar` (alias `sair`), `/agendar` — ver [tabela](#comandos-suportados)
 - **Inscrição modular**: `alertas`, `boletins` ou `todos`, tanto nos comandos quanto na API
 - **Boletim personalizado por grupo** (`/agendar HH:MM`, `/agendar off`)
 - **Localização por GPS** (opt-in): `/configurar gps` (ou `/cidade gps`) abre um aguardo de 2 min; o pin/live location enviado nesse intervalo salva o local e é confirmado com `/clima`. Pin enviado fora do aguardo não sobrescreve a cidade escolhida
@@ -491,7 +491,8 @@ Os comandos valem em **duas formas de invocação**:
 | `/comparar`, `/crajubar` | Tabela compacta (uma linha por cidade) com Barbalha, Juazeiro do Norte e Crato na janela escolhida |
 | `/janela [1h\|2h\|3h\|4h\|padrao]` | Janela da previsão on-demand do contato; sem argumento mostra as opções numeradas (envie `1`–`4` ou `0` para o padrão) |
 | `/inscrever [alertas\|boletins\|todos]` | Ativa o envio de alertas climáticos e/ou boletins (padrão: todos) |
-| `/sair [alertas\|boletins\|todos]` | Cancela a inscrição nos tipos informados |
+| `/cancelar [alertas\|boletins\|todos]` | Cancela a inscrição nos tipos informados |
+| `/sair [alertas\|boletins\|todos]` | Alias de `/cancelar` |
 | `/agendar HH:MM` · `/agendar off` | (Grupos) agenda/desativa o boletim personalizado do grupo |
 | `/admin …` | Administração com sessão — ver [Administração](#administração-admin) |
 | `/configurar gps` · `/cidade gps` | Aguarda (2 min) o envio de uma localização GPS pelo WhatsApp |
@@ -671,7 +672,7 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_webhook.py` | 35 | Roteamento de comandos (`/ajuda [comando]`, `/configurar`, `/comparar`, `/janela`, `/inscrever`, `/sair`, `/clima`), menu numerado de `/janela` (sem lista interativa: Baileys não suporta), janela escolhida chegando aos builders de `/clima` e `/comparar` (`/janela padrao` volta ao default), `extract_location`, aguardo de GPS (pin só vale após `/configurar gps`, expira em 2 min), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
+| `tests/test_webhook.py` | 35 | Roteamento de comandos (`/ajuda [comando]`, `/configurar`, `/comparar`, `/janela`, `/inscrever`, `/cancelar`, `/clima`), menu numerado de `/janela` (sem lista interativa: Baileys não suporta), janela escolhida chegando aos builders de `/clima` e `/comparar` (`/janela padrao` volta ao default), `extract_location`, aguardo de GPS (pin só vale após `/configurar gps`, expira em 2 min), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
 | `tests/test_d1_store.py` | 26 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 sobre SQLite real com as migrations aplicadas (assinantes, localização, janela da previsão, dedupe, dica), alert history, sessões administrativas e conversão FFI |
 | `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
 | `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |

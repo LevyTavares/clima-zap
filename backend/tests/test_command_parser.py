@@ -31,6 +31,7 @@ def test_slash_form_parses_command_and_args():
     assert parse_invocation("/?") == ("ajuda", "")
     assert parse_invocation("/previzão") == ("clima", "")
     assert parse_invocation("/janelas 2h") == ("janela", "2h")
+    assert parse_invocation("/sair alertas") == ("cancelar", "alertas")
     assert parse_invocation("/") is None
     assert parse_invocation("") is None
 

@@ -8,7 +8,7 @@ def test_get_help_message_content():
     assert "*/clima*" in help_text
     assert "*/configurar" in help_text
     assert "*/inscrever" in help_text
-    assert "*/sair" in help_text
+    assert "*/cancelar" in help_text
     assert "*/ajuda [comando]*" in help_text
 
     janela = get_help_message("janelas")

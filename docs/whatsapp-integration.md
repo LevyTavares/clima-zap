@@ -123,7 +123,8 @@ Aliases are normalized in one place (`COMMAND_ALIASES` in `app/services/command_
 | `/configuracao …`, `/cidade …` | Aliases of `/configurar` (same validations) |
 | `/janela [1h\|2h\|3h\|4h\|padrao]` | Forecast window for `/clima` and `/comparar`; no argument shows the numbered options (`1`–`4`, `0` = default) |
 | `/inscrever [alertas\|boletins\|todos]` | Subscribe the contact to weather alerts and/or bulletins |
-| `/sair [alertas\|boletins\|todos]` | Unsubscribe from the given types |
+| `/cancelar [alertas\|boletins\|todos]` | Unsubscribe from the given types |
+| `/sair [alertas\|boletins\|todos]` | Alias of `/cancelar` |
 | `/agendar HH:MM \| off` | Schedule this group's custom bulletin |
 | Unknown command (`/foo`) | Command-not-understood message pointing to `/ajuda` |
 | Non-command text | In groups: silence. In DMs: a one-time hint with `/ajuda`. |

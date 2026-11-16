@@ -24,9 +24,9 @@ COMMANDS: list[tuple[str, str, str]] = [
         "Ativa alertas e/ou boletins (padrão: todos).",
     ),
     (
-        "sair",
-        "/sair [alertas|boletins|todos]",
-        "Cancela os tipos informados (padrão: todos).",
+        "cancelar",
+        "/cancelar [alertas|boletins|todos]",
+        "Cancela os tipos informados (padrão: todos); /sair é atalho.",
     ),
     (
         "agendar",

@@ -34,7 +34,7 @@ class Subscriber(Base):
     window_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Inscrição modular: alertas climáticos (weather alerts) e boletins
     # periódicos (forecasts) são independentes — o usuário escolhe um,
-    # outro ou ambos (ou nenhum, via /sair).
+    # outro ou ambos (ou nenhum, via /cancelar).
     receive_alerts: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )

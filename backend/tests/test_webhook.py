@@ -354,10 +354,10 @@ def test_subscribe_and_leave_cycle(test_database):
     again = run_command("/inscrever")
     assert "já está inscrito" in again
 
-    left = run_command("/sair")
+    left = run_command("/cancelar")
     assert "cancelada" in left
 
-    left_again = run_command("/sair")
+    left_again = run_command("/sair")  # alias antigo continua valendo
     assert "não possui inscrição" in left_again
 
     async def read_is_active():

@@ -36,7 +36,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "comparar": ("crajubar",),
     "configurar": ("configuracao", "configuração", "config", "cidade"),
     "inscrever": (),
-    "sair": (),
+    "cancelar": ("sair",),
     "janela": ("janelas",),
     "agendar": (),
     "status": ("status?",),

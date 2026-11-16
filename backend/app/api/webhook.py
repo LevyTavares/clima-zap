@@ -255,7 +255,7 @@ async def handle_agendar_command(  # pylint: disable=too-many-return-statements
 
 
 async def handle_subscription_command(command: str, recipient: str, args: str = "") -> str:
-    """Comandos `inscrever` / `sair`: ativa ou cancela alertas e/ou boletins."""
+    """Comandos `inscrever` / `cancelar`: ativa ou cancela alertas e/ou boletins."""
     kinds_arg = args.strip() if args else None
 
     if command == "inscrever":
@@ -354,7 +354,7 @@ async def route_command(  # pylint: disable=too-many-return-statements
     if command == "janela":
         return await handle_window_command(args, recipient)
 
-    if command in ("inscrever", "sair"):
+    if command in ("inscrever", "cancelar"):
         return await handle_subscription_command(command, recipient, args)
 
     if command == "agendar":
