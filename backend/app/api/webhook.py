@@ -28,7 +28,9 @@ from app.services.forecast import build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
+    is_awaiting_gps,
     is_duplicate_message,
+    set_awaiting_gps,
     set_subscriber_location,
     should_hint_dm,
     subscribe_recipient,
@@ -156,18 +158,31 @@ async def _apply_city(recipient: str, city_query: str) -> str:
     )
 
 
+GPS_PROMPT_TEXT = (
+    "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
+    "para definir sua cidade."
+)
+
+
 async def handle_city_command(city_query: str, recipient: str) -> str:
     """Comando `/cidade [nome]` — atalho de /configuracao para cidades."""
+    if city_query.strip().lower() in ("gps", "--gps", "localizacao", "localização"):
+        await set_awaiting_gps(recipient, True)
+        return GPS_PROMPT_TEXT
     if not city_query:
         return await _show_location(recipient)
     return await _apply_city(recipient, city_query)
 
 
 async def handle_config_command(args: str, recipient: str) -> str:
-    """Comando `/configuracao [cidade | lat,lon | padrao]`."""
+    """Comando `/configuracao [cidade | lat,lon | gps | padrao]`."""
     query = args.strip()
     if not query:
         return await _show_location(recipient)
+
+    if query.lower() in ("gps", "--gps", "localizacao", "localização"):
+        await set_awaiting_gps(recipient, True)
+        return GPS_PROMPT_TEXT
 
     if query.lower() in ("padrao", "padrão", "reset", "default"):
         await clear_subscriber_location(recipient)
@@ -360,19 +375,24 @@ async def process_event_background(payload: WebhookPayload):
     sender = extract_sender_jid(data)
 
     loc_data = extract_location(data)
-    if loc_data and sender:
-        recipient = recipient_key(sender)
+    recipient = recipient_key(sender) if sender else ""
+
+    # Fluxo GPS: só grava a localização quando o contato pediu com
+    # `/configuracao gps` (aguardo de 2 min). Pin enviado por outro motivo
+    # não sobrescreve a cidade escolhida.
+    if loc_data is not None and recipient and await is_awaiting_gps(recipient):
         lat, lon, loc_name = loc_data
-        name_to_set = loc_name or f"GPS ({lat:.2f}, {lon:.2f})"
-        await set_subscriber_location(recipient, name_to_set, lat, lon)
-        response = (
-            f"📍 Localização GPS recebida e salva: *{name_to_set}*!\n"
-            "Envie ```/clima``` para ver a previsão do tempo atualizada."
-        )
+        place = loc_name or f"GPS ({lat:g}, {lon:g})"
+        await set_subscriber_location(recipient, place, lat, lon)
+        await set_awaiting_gps(recipient, False)
         try:
-            await send_whatsapp_message(recipient, response)
-        except EvolutionError as e:
-            logger.error("Erro ao enviar confirmação de GPS para %s: %s", recipient, e)
+            await send_whatsapp_message(
+                recipient,
+                f"📍 Localização recebida e salva: *{place}*!\n"
+                "Envie ```/clima``` para ver a previsão do tempo atualizada.",
+            )
+        except EvolutionError as error:
+            logger.error("Erro ao enviar feedback de GPS para %s: %s", recipient, error)
         return
 
     if not message_text or not sender:
@@ -384,7 +404,6 @@ async def process_event_background(payload: WebhookPayload):
         )
         return
 
-    recipient = recipient_key(sender)
     invocation = parse_invocation(message_text, extract_mentioned_jids(data))
     admin_password = settings.admin_password.get_secret_value()
     admin_attempt = (

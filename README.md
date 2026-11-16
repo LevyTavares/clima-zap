@@ -31,7 +31,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 
 - **Previsão Open-Meteo** (sem API key): condições atuais (temperatura, umidade, chuva, UV), máximas/mínimas do dia e série horária (precipitação, UV, `weather_code`) para 2 dias, fuso `America/Fortaleza`
 - **Motor de regras preventivas** — UV ≥ 8.0, umidade ≤ 30%, chuva ≥ 70% — aplicado no endpoint, nos jobs agendados e no comando `/clima`, com texto em Markdown de WhatsApp
-- **Local por assinante**: presets do Crajubar (Barbalha, Juazeiro do Norte, Crato por nome, número ou emoji), qualquer cidade pelo geocoder da Open-Meteo, coordenadas `lat,lon`, localização GPS enviada no chat, e `/configuracao padrao` para voltar à região padrão
+- **Local por assinante**: presets do Crajubar (Barbalha, Juazeiro do Norte, Crato por nome, número ou emoji), qualquer cidade pelo geocoder da Open-Meteo, coordenadas `lat,lon`, localização GPS (opt-in, ver abaixo), e `/configuracao padrao` para voltar à região padrão
 - **`/comparar`** — previsão simultânea das 3 cidades do Crajubar em uma única mensagem (builds em paralelo)
 - **Cache em memória por local** (10 min) nas consultas à Open-Meteo
 
@@ -41,7 +41,7 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 - **Comandos**: `/ajuda`, `/status`, `/clima` (aliases `forecast`/`previsao`/…), `/configuracao`, `/cidade`, `/comparar`, `/inscrever`, `/sair`, `/agendar` — ver [tabela](#comandos-suportados)
 - **Inscrição modular**: `alertas`, `boletins` ou `todos`, tanto nos comandos quanto na API
 - **Boletim personalizado por grupo** (`/agendar HH:MM`, `/agendar off`)
-- **Localização por GPS**: qualquer mensagem de localização (pin ou live location) salva o local do contato e confirma com `/clima`
+- **Localização por GPS** (opt-in): `/configuracao gps` (ou `/cidade gps`) abre um aguardo de 2 min; o pin/live location enviado nesse intervalo salva o local e é confirmado com `/clima`. Pin enviado fora do aguardo não sobrescreve a cidade escolhida
 - **Deduplicação de mensagens** por id da Evolution (TTL 5 min)
 - **Formatadores** de resumo, alerta urgente, boletim por período e saudações por horário
 - **Verificação da instância** WhatsApp (`/instance/connectionState`) usada por `/status` e `/admin status`
@@ -489,7 +489,7 @@ Os comandos valem em **duas formas de invocação**:
 | `/sair [alertas\|boletins\|todos]` | Cancela a inscrição nos tipos informados |
 | `/agendar HH:MM` · `/agendar off` | (Grupos) agenda/desativa o boletim personalizado do grupo |
 | `/admin …` | Administração com sessão — ver [Administração](#administração-admin) |
-| Enviar localização (GPS) | Salva a localização do contato e responde com o local definido |
+| `/configuracao gps` · `/cidade gps` | Aguarda (2 min) o envio de uma localização GPS pelo WhatsApp |
 | Comando desconhecido (`/foo`) | Mensagem de comando não reconhecido + `/ajuda` |
 | Texto sem invocação | Grupo: silêncio · Privado: dica única de `/ajuda` |
 
@@ -665,7 +665,7 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_webhook.py` | 20 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/inscrever`, `/sair`, `/clima`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
+| `tests/test_webhook.py` | 22 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/comparar`, `/inscrever`, `/sair`, `/clima`), `extract_location`, aguardo de GPS (pin só vale após `/configuracao gps`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
 | `tests/test_d1_store.py` | 25 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history, sessões administrativas e conversão FFI |
 | `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
 | `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |

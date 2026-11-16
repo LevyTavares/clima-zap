@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.main import app
 from app.models import Subscriber
 from app.services.command_parser import parse_invocation
+from app.services.persistence import is_awaiting_gps
 
 client = TestClient(app)
 RECIPIENT = "5588999999999"
@@ -149,6 +150,56 @@ def test_configuracao_reset_returns_to_default(test_database):
 
     show_reply = run_command("/configuracao")
     assert "Nenhum local definido" in show_reply
+
+
+def test_configuracao_gps_aguarda_localizacao(test_database):
+    reply = run_command("/configuracao gps")
+
+    assert "Envie sua localização" in reply
+    assert run(is_awaiting_gps(RECIPIENT)) is True
+
+
+def test_pin_so_sobrescreve_local_quando_aguardando(test_database, monkeypatch):
+    sent = []
+
+    async def fake_send(number, message):
+        sent.append((number, message))
+        return {"status": "sent"}
+
+    monkeypatch.setattr("app.api.webhook.send_whatsapp_message", fake_send)
+
+    def payload(message_id):
+        return {
+            "event": "MESSAGES_UPSERT",
+            "instance": "clima-zap",
+            "data": {
+                "key": {
+                    "remoteJid": f"{RECIPIENT}@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": message_id,
+                },
+                "message": {
+                    "locationMessage": {
+                        "degreesLatitude": -7.31,
+                        "degreesLongitude": -39.31,
+                        "name": "Barbalha",
+                    }
+                },
+            },
+        }
+
+    run_command("/cidade crato")
+    client.post("/api/v1/webhook", json=payload("TEST-GPS-1"))
+
+    assert read_location(test_database, RECIPIENT)[0] == "Crato"
+    assert sent == []
+
+    run_command("/configuracao gps")
+    client.post("/api/v1/webhook", json=payload("TEST-GPS-2"))
+
+    assert read_location(test_database, RECIPIENT)[0] == "Barbalha"
+    assert "Barbalha" in sent[0][1]
+    assert run(is_awaiting_gps(RECIPIENT)) is False
 
 
 def test_configuracao_geocodes_cities_outside_presets(test_database, monkeypatch):
