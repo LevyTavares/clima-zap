@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.main import app
 from app.models import Subscriber
 from app.services.command_parser import parse_invocation
-from app.services.persistence import is_awaiting_gps
+from app.services.persistence import is_awaiting_gps, set_awaiting_gps
 
 client = TestClient(app)
 RECIPIENT = "5588999999999"
@@ -200,6 +200,33 @@ def test_pin_so_sobrescreve_local_quando_aguardando(test_database, monkeypatch):
     assert read_location(test_database, RECIPIENT)[0] == "Barbalha"
     assert "Barbalha" in sent[0][1]
     assert run(is_awaiting_gps(RECIPIENT)) is False
+
+
+def test_aguardo_gps_expira(test_database):
+    run(set_awaiting_gps(RECIPIENT, True))
+    assert run(is_awaiting_gps(RECIPIENT)) is True
+
+    async def read_subscriber():
+        async with test_database() as session:
+            result = await session.execute(
+                select(Subscriber).where(Subscriber.phone == RECIPIENT)
+            )
+            return result.scalar_one()
+
+    async def force_expired():
+        async with test_database() as session:
+            result = await session.execute(
+                select(Subscriber).where(Subscriber.phone == RECIPIENT)
+            )
+            result.scalar_one().gps_expires_at = 1.0  # epoch antigo → janela vencida
+            await session.commit()
+
+    run(force_expired())
+
+    assert run(is_awaiting_gps(RECIPIENT)) is False
+    subscriber = run(read_subscriber())
+    assert subscriber.awaiting_gps is False
+    assert subscriber.gps_expires_at is None
 
 
 def test_configuracao_geocodes_cities_outside_presets(test_database, monkeypatch):
