@@ -345,9 +345,7 @@ async def set_awaiting_gps(phone: str, value: bool) -> None:
 
     Quando ativado, define expiração de 2 minutos.
     """
-    import time as _time
-
-    expires = (_time.time() + 120.0) if value else None
+    expires = (time.time() + 120.0) if value else None
     if worker_runtime.on_workers():
         await d1.set_awaiting_gps(phone, value, expires)
         return
@@ -363,15 +361,13 @@ async def set_awaiting_gps(phone: str, value: bool) -> None:
 
 async def is_awaiting_gps(phone: str) -> bool:
     """True se o destinatário está aguardando envio de localização (e não expirou)."""
-    import time as _time
-
     if worker_runtime.on_workers():
-        return await d1.is_awaiting_gps(phone, _time.time())
+        return await d1.is_awaiting_gps(phone, time.time())
     async with db_session.SessionLocal() as session:
         subscriber = await _find_subscriber(session, phone)
         if not subscriber or not subscriber.awaiting_gps:
             return False
-        if subscriber.gps_expires_at and _time.time() > subscriber.gps_expires_at:
+        if subscriber.gps_expires_at and time.time() > subscriber.gps_expires_at:
             subscriber.awaiting_gps = False
             subscriber.gps_expires_at = None
             await session.commit()

@@ -2,27 +2,28 @@
 
 O caminho Docker usa o mapeamento ORM (``app.models``), que importa SQLAlchemy.
 O Worker precisa representar as linhas do D1 sem empacotar o SQLAlchemy (~9 MB
-no bundle), então aqui ficam dataclasses puras: os consumidores (adaptador D1,
+no bundle), então aqui fica a dataclass pura, gerada da mesma lista de colunas
+que o adaptador D1 usa (``app.db.columns``) — os consumidores (adaptador D1,
 dispatcher de alertas, resolução de local) só leem os campos.
 """
 
-from dataclasses import dataclass
+from dataclasses import field, make_dataclass
+
+from app.db.columns import SUBSCRIBER_COLUMNS
 
 
-@dataclass
-class Subscriber:
-    """Assinante — linha do D1 (Workers) ou do ORM (Docker), sem ORM aqui."""
+def _field(column):
+    if column.required:
+        return (column.name, column.py_type)
+    # field() é consumido pelo make_dataclass logo abaixo
+    # pylint: disable-next=invalid-field-call
+    return (column.name, column.py_type, field(default=column.default))
 
-    phone: str
-    id: int | None = None
-    name: str | None = None
-    city: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    is_active: bool = False
-    receive_alerts: bool = False
-    receive_bulletins: bool = False
-    bulletin_time: str | None = None
-    awaiting_gps: bool = False
-    gps_expires_at: float | None = None
-    window_minutes: int | None = None
+
+Subscriber = make_dataclass(
+    "Subscriber",
+    [_field(column) for column in SUBSCRIBER_COLUMNS],
+    namespace={
+        "__doc__": "Assinante — linha do D1 (Workers) ou do ORM (Docker), sem ORM aqui."
+    },
+)

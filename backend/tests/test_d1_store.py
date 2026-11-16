@@ -7,8 +7,10 @@ CPython; cobrimos a conversão com um stub que expõe ``to_py``/atributos.
 
 import asyncio
 import logging
+import sqlite3
 import sys
 import types
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -19,6 +21,8 @@ from app.core import worker_runtime
 from app.core.config import settings
 from app.db import d1
 from app.services import admin_sessions, alert_history, persistence
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 # ---------------------------------------------------------------------------
 # Fake do D1Database (memória) — casa exatamente as SQL usadas pelo adapter.
@@ -38,307 +42,48 @@ class FakeStatement:
         return self
 
     async def all(self):
-        return self._database.execute(self._sql, self._params)
+        return self._database.query(self._sql, self._params)
 
     async def run(self):
-        return self._database.execute(self._sql, self._params)
+        return self._database.query(self._sql, self._params)
 
 
 class FakeD1:
-    """Banco em memória com as tabelas do schema (migrations/0001_init.sql)."""
+    """D1 de teste sobre SQLite real, com as migrations aplicadas.
+
+    Antes este fake reimplementava cada SQL à mão e virava uma segunda
+    implementação do adaptador (era onde a coluna nova "sumia" dos testes).
+    Agora o SQL do `app/db/d1.py` roda de verdade: o dialeto é o mesmo do D1,
+    então migração e query são exercitadas como em produção.
+    """
 
     def __init__(self):
-        self.subscribers: dict[str, dict] = {}
-        self.alert_logs: list[dict] = []
-        self.seen: dict[str, float] = {}
-        self.dm_hints: dict[str, float] = {}
-        self.admin_sessions: dict[str, dict] = {}
-        self._next_id = 1
+        self.conn = sqlite3.connect(":memory:", check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        for migration in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            self.conn.executescript(migration.read_text(encoding="utf-8"))
 
     def prepare(self, sql: str) -> FakeStatement:
         return FakeStatement(self, sql)
 
-    def execute(self, sql: str, params: tuple) -> dict:  # pylint: disable=too-many-branches,too-many-statements
-        sql = " ".join(sql.split())
-        rows, changes = [], 0
-
-        if sql == "SELECT * FROM subscribers WHERE phone = ?":
-            subscriber = self.subscribers.get(params[0])
-            rows = [dict(subscriber)] if subscriber else []
-
-        elif sql == "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL)":
-            self.subscribers[params[0]] = {
-                "id": self._next_id,
-                "phone": params[0],
-                "name": params[1],
-                "city": None,
-                "latitude": None,
-                "longitude": None,
-                "is_active": params[2],
-                "receive_alerts": params[3],
-                "receive_bulletins": params[4],
-                "bulletin_time": None,
-                "awaiting_gps": 0,
-                "gps_expires_at": None,
-            }
-            self._next_id += 1
-            changes = 1
-
-        elif sql == (
-            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
-            "receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) VALUES (?, ?, ?, ?, 0, 0, 0, NULL, 0, NULL)"
-        ):
-            self.subscribers[params[0]] = {
-                "id": self._next_id,
-                "phone": params[0],
-                "name": None,
-                "city": params[1],
-                "latitude": params[2],
-                "longitude": params[3],
-                "is_active": 0,
-                "receive_alerts": 0,
-                "receive_bulletins": 0,
-                "bulletin_time": None,
-                "awaiting_gps": 0,
-                "gps_expires_at": None,
-            }
-            self._next_id += 1
-            changes = 1
-
-        elif sql.startswith("UPDATE subscribers SET is_active = ?"):
-            # new subscribe update: is_active=?, receive_alerts=?, receive_bulletins=?, [name=?], phone=?
-            # params order: is_active, receive_alerts, receive_bulletins, (name?), phone
-            subscriber = self.subscribers[params[-1]]
-            subscriber["is_active"] = params[0]
-            subscriber["receive_alerts"] = params[1]
-            subscriber["receive_bulletins"] = params[2]
-            if "name = ?" in sql:
-                subscriber["name"] = params[3]
-            changes = 1
-
-        elif sql == (
-            "UPDATE subscribers SET city = ?, latitude = ?, longitude = ?"
-            " WHERE phone = ?"
-        ):
-            subscriber = self.subscribers[params[3]]
-            subscriber["city"] = params[0]
-            subscriber["latitude"] = params[1]
-            subscriber["longitude"] = params[2]
-            changes = 1
-
-        elif sql == "UPDATE subscribers SET bulletin_time = ? WHERE phone = ?":
-            subscriber = self.subscribers.get(params[1])
-            if subscriber is not None:
-                subscriber["bulletin_time"] = params[0]
-                changes = 1
-
-        elif sql == "UPDATE subscribers SET awaiting_gps = ?, gps_expires_at = ? WHERE phone = ?":
-            subscriber = self.subscribers.get(params[2])
-            if subscriber is not None:
-                subscriber["awaiting_gps"] = params[0]
-                subscriber["gps_expires_at"] = params[1]
-                changes = 1
-
-        elif sql == "UPDATE subscribers SET awaiting_gps = 0, gps_expires_at = NULL WHERE phone = ?":
-            subscriber = self.subscribers.get(params[0])
-            if subscriber is not None:
-                subscriber["awaiting_gps"] = 0
-                subscriber["gps_expires_at"] = None
-                changes = 1
-
-        elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, awaiting_gps, gps_expires_at) VALUES (?, 0, 0, 0, ?, ?)":
-            self.subscribers[params[0]] = {
-                "id": self._next_id,
-                "phone": params[0],
-                "name": None,
-                "city": None,
-                "latitude": None,
-                "longitude": None,
-                "is_active": 0,
-                "receive_alerts": 0,
-                "receive_bulletins": 0,
-                "bulletin_time": None,
-                "awaiting_gps": params[1],
-                "gps_expires_at": params[2],
-            }
-            self._next_id += 1
-            changes = 1
-
-        elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, window_minutes) VALUES (?, 0, 0, 0, ?)":
-            self.subscribers[params[0]] = {
-                "id": self._next_id,
-                "phone": params[0],
-                "name": None,
-                "city": None,
-                "latitude": None,
-                "longitude": None,
-                "is_active": 0,
-                "receive_alerts": 0,
-                "receive_bulletins": 0,
-                "bulletin_time": None,
-                "awaiting_gps": 0,
-                "gps_expires_at": None,
-                "window_minutes": params[1],
-            }
-            self._next_id += 1
-            changes = 1
-
-        elif sql == "UPDATE subscribers SET window_minutes = ? WHERE phone = ?":
-            subscriber = self.subscribers.get(params[1])
-            if subscriber is not None:
-                subscriber["window_minutes"] = params[0]
-                changes = 1
-
-        elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, bulletin_time) VALUES (?, 0, 0, 0, ?)":
-            self.subscribers[params[0]] = {
-                "id": self._next_id,
-                "phone": params[0],
-                "name": None,
-                "city": None,
-                "latitude": None,
-                "longitude": None,
-                "is_active": 0,
-                "receive_alerts": 0,
-                "receive_bulletins": 0,
-                "bulletin_time": params[1],
-            }
-            self._next_id += 1
-            changes = 1
-
-        elif sql == (
-            "UPDATE subscribers SET city = NULL, latitude = NULL, longitude = NULL"
-            " WHERE phone = ?"
-        ):
-            subscriber = self.subscribers[params[0]]
-            subscriber["city"] = None
-            subscriber["latitude"] = None
-            subscriber["longitude"] = None
-            changes = 1
-
-        elif sql == "SELECT * FROM subscribers WHERE is_active = 1":
-            rows = [
-                dict(sub) for sub in self.subscribers.values() if sub["is_active"]
-            ]
-
-        elif sql.startswith("SELECT * FROM subscribers WHERE is_active = 1 AND substr(phone, -5)"):
-            suffix = params[0] if params else ""
-            rows = [
-                dict(sub) for sub in self.subscribers.values()
-                if sub["is_active"] and str(sub["phone"]).endswith(suffix)
-            ]
-
-        elif sql.startswith("INSERT INTO alert_logs"):
-            self.alert_logs.append(
-                {
-                    "id": self._next_id,
-                    # default da tabela no D1: datetime('now') em UTC
-                    "sent_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                    "alert_type": params[0],
-                    "recipient": params[1],
-                    "delivery_status": params[2],
-                    "subscriber_id": params[3],
-                }
-            )
-            self._next_id += 1
-            changes = 1
-
-        elif sql.startswith("DELETE FROM alert_logs WHERE sent_at < datetime('now', ?)"):
-            dias = int(params[0].split()[0])
-            cutoff = (datetime.now(timezone.utc) + timedelta(days=dias)).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-            mantidos = [log for log in self.alert_logs if log["sent_at"] >= cutoff]
-            changes = len(self.alert_logs) - len(mantidos)
-            self.alert_logs = mantidos
-
-        elif sql.startswith(
-            "SELECT alert_type, recipient, delivery_status, sent_at FROM alert_logs"
-        ):
-            ordered = sorted(
-                self.alert_logs, key=lambda log: log["id"], reverse=True
-            )
-            rows = [
-                {
-                    "alert_type": log["alert_type"],
-                    "recipient": log["recipient"],
-                    "delivery_status": log["delivery_status"],
-                    "sent_at": log["sent_at"],
-                }
-                for log in ordered[: params[0]]
-            ]
-
-        elif sql.startswith("INSERT OR IGNORE INTO seen_messages"):
-            if params[0] in self.seen:
-                changes = 0
-            else:
-                self.seen[params[0]] = params[1]
-                changes = 1
-
-        elif sql == "INSERT OR IGNORE INTO dm_hints (phone, shown_at) VALUES (?, ?)":
-            if params[0] in self.dm_hints:
-                changes = 0
-            else:
-                self.dm_hints[params[0]] = params[1]
-                changes = 1
-
-        elif sql.startswith("INSERT INTO admin_sessions"):
-            self.admin_sessions[params[0]] = {
-                "phone": params[0],
-                "password_fingerprint": params[1],
-                "registered_at": params[2],
-                "expires_at": params[3],
-                "notified_at": None,
-            }
-            changes = 1
-
-        elif (
-            "FROM admin_sessions WHERE phone = ?"
-            " AND password_fingerprint = ? AND expires_at > ?" in sql
-        ):
-            session = self.admin_sessions.get(params[0])
-            if (
-                session
-                and session["password_fingerprint"] == params[1]
-                and session["expires_at"] > params[2]
-            ):
-                rows = [dict(session)]
-
-        elif (
-            "FROM admin_sessions WHERE expires_at <= ?"
-            " AND notified_at IS NULL" in sql
-        ):
-            expired = [
-                dict(session)
-                for session in self.admin_sessions.values()
-                if session["expires_at"] <= params[0]
-                and session["notified_at"] is None
-            ]
-            expired.sort(key=lambda session: session["expires_at"])
-            rows = expired[: params[1]]
-
-        elif sql == "UPDATE admin_sessions SET notified_at = ? WHERE phone = ?":
-            session = self.admin_sessions.get(params[1])
-            if session is not None:
-                session["notified_at"] = params[0]
-                changes = 1
-
-        elif sql == "DELETE FROM admin_sessions WHERE phone = ?":
-            if self.admin_sessions.pop(params[0], None) is not None:
-                changes = 1
-
-        elif sql == "DELETE FROM seen_messages WHERE seen_at < ?":
-            expired = [k for k, seen_at in self.seen.items() if seen_at < params[0]]
-            for key in expired:
-                self.seen.pop(key)
-            changes = len(expired)
-
-        elif sql == "SELECT 1 AS ok":
-            rows = [{"ok": 1}]
-
-        else:
-            raise AssertionError(f"SQL não prevista no fake: {sql}")
-
+    def query(self, sql: str, params: tuple) -> dict:
+        cursor = self.conn.execute(sql, params)
+        rows = [dict(row) for row in cursor.fetchall()]
+        self.conn.commit()
+        changes = cursor.rowcount if cursor.rowcount > 0 else 0
         return {"results": rows, "meta": {"changes": changes}, "success": True}
+
+    def rows(self, sql: str, *params) -> list[dict]:
+        return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+
+    def one(self, sql: str, *params) -> dict | None:
+        rows = self.rows(sql, *params)
+        return rows[0] if rows else None
+
+    def run(self, sql: str, *params) -> int:
+        cursor = self.conn.execute(sql, params)
+        self.conn.commit()
+        return cursor.rowcount
 
 
 @pytest.fixture(name="workers_env")
@@ -438,7 +183,9 @@ def test_subscribe_unsubscribe_flow_via_d1(workers_env):
     assert twice["status"] == "not_found"
     assert reactivated["status"] == "success"
 
-    stored = workers_env.DB.subscribers["+5588999999999"]
+    stored = workers_env.DB.one(
+        "SELECT * FROM subscribers WHERE phone = ?", "+5588999999999"
+    )
     assert stored["is_active"] == 1
     assert stored["name"] == "Ana Maria"
 
@@ -476,20 +223,18 @@ def test_location_clear_returns_to_default_via_d1(workers_env):  # pylint: disab
         return await persistence.get_subscriber_location("+5588333344444")
 
     assert asyncio.run(flow()) is None
-    stored = workers_env.DB.subscribers["+5588333344444"]
+    stored = workers_env.DB.one(
+        "SELECT * FROM subscribers WHERE phone = ?", "+5588333344444"
+    )
     assert (stored["city"], stored["latitude"], stored["longitude"]) == (None, None, None)
 
 
 def test_legacy_city_without_coords_resolves_preset_via_d1(workers_env):  # pylint: disable=unused-argument
-    workers_env.DB.subscribers["+5588666666666"] = {
-        "id": 99,
-        "phone": "+5588666666666",
-        "name": None,
-        "city": "Crato",
-        "latitude": None,
-        "longitude": None,
-        "is_active": 1,
-    }
+    workers_env.DB.run(
+        "INSERT INTO subscribers (phone, city, is_active) VALUES (?, ?, 1)",
+        "+5588666666666",
+        "Crato",
+    )
 
     location = asyncio.run(persistence.get_subscriber_location("+5588666666666"))
 
@@ -507,7 +252,10 @@ def test_janela_da_previsao_via_d1(workers_env):  # pylint: disable=unused-argum
 
     assert padrao == settings.forecast_window_minutes
     assert escolhida == 180
-    assert workers_env.DB.subscribers["+5588777777777"]["window_minutes"] == 180
+    stored = workers_env.DB.one(
+        "SELECT window_minutes FROM subscribers WHERE phone = ?", "+5588777777777"
+    )
+    assert stored["window_minutes"] == 180
 
 
 def test_dm_hint_shown_only_once_via_d1(workers_env):  # pylint: disable=unused-argument
@@ -531,7 +279,7 @@ def test_alert_history_via_d1(workers_env):
         )
     )
 
-    log = workers_env.DB.alert_logs[0]
+    log = workers_env.DB.one("SELECT * FROM alert_logs ORDER BY id LIMIT 1")
     assert log["alert_type"] == "weather_alert"
     assert log["recipient"] == "+5588333333333"
     assert log["delivery_status"] == "sent"
@@ -561,11 +309,18 @@ def test_prune_alert_logs_via_d1(workers_env):
         await alert_history.record_alert_dispatch("weather_alert", "+5588", "sent")
         await alert_history.record_alert_dispatch("weather_alert", "+5599", "sent")
         # envelhece o primeiro: o prune por retenção deve levar só ele
-        workers_env.DB.alert_logs[0]["sent_at"] = "2020-01-01 00:00:00"
+        workers_env.DB.run(
+            "UPDATE alert_logs SET sent_at = ? WHERE recipient = ?",
+            "2020-01-01 00:00:00",
+            "+5588",
+        )
         return await alert_history.prune_alert_logs(90)
 
     assert asyncio.run(flow()) == 1
-    assert [log["recipient"] for log in workers_env.DB.alert_logs] == ["+5599"]
+    recipients = [
+        row["recipient"] for row in workers_env.DB.rows("SELECT recipient FROM alert_logs")
+    ]
+    assert recipients == ["+5599"]
 
 
 def test_recent_alert_dispatches_via_d1(workers_env):  # pylint: disable=unused-argument
@@ -613,7 +368,7 @@ def test_sessao_administrativa_via_d1(workers_env):  # pylint: disable=unused-ar
     assert [session["phone"] for session in expired] == [phone]
     assert after_notice == []
     assert revoked is True
-    assert not workers_env.DB.admin_sessions
+    assert workers_env.DB.one("SELECT 1 AS x FROM admin_sessions") is None
 
 
 # ---------------------------------------------------------------------------

@@ -10,9 +10,14 @@ import sqlite3
 from pathlib import Path
 
 from app.db.base import Base
+from app.db.columns import SUBSCRIBER_COLUMNS
 from app.models import AlertLog, Subscriber  # pylint: disable=unused-import
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+
+# Colunas que só existem no banco (default CURRENT_TIMESTAMP) e não trafegam
+# no dataclass de domínio.
+ORM_ONLY_COLUMNS = {"registered_at"}
 
 # Tabelas que só existem no caminho Workers (estado do isolate → D1).
 WORKERS_ONLY_TABLES = {"seen_messages", "dm_hints"}
@@ -65,6 +70,20 @@ def test_nulabilidade_das_colunas_compartilhadas_bate():
             assert schema[name][column.name] is (not column.nullable), (
                 f"{name}.{column.name}: NOT NULL do D1 difere do ORM"
             )
+
+
+def test_dominio_e_adaptador_d1_cobrem_as_mesmas_colunas_do_orm():
+    """`app/db/columns.py` é a fonte do domínio e do D1: não pode divergir do ORM."""
+    orm_columns = {
+        column.name for column in Subscriber.__table__.columns
+    } - ORM_ONLY_COLUMNS
+    spec_columns = {column.name for column in SUBSCRIBER_COLUMNS}
+
+    assert spec_columns == orm_columns, (
+        "colunas do domínio/D1 divergem do ORM: "
+        f"faltando={sorted(orm_columns - spec_columns)} "
+        f"sobrando={sorted(spec_columns - orm_columns)}"
+    )
 
 
 def test_tabelas_do_d1_sao_do_orm_ou_exclusivas_do_workers():

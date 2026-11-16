@@ -30,11 +30,10 @@ from app.services.admin_sessions import (
     list_expired_admin_sessions,
     mark_admin_session_notified,
 )
-from app.services.alerts import generate_weather_alerts
 from app.services.alert_history import prune_alert_logs, record_alert_dispatch
 from app.services.evolution_client import send_whatsapp_message
 from app.core.clock import local_now
-from app.services.forecast import Period, build_period_forecast
+from app.services.forecast import Period, build_period_forecast, build_weather_alerts
 from app.services.persistence import (
     group_active_subscribers_by_city,
     list_active_subscribers,
@@ -81,12 +80,7 @@ async def process_scheduled_weather_alerts() -> dict[str, int]:
         summary["locations"] += 1
         location = resolve_group_location(city, subscribers)
         weather_info = await fetch_cariri_weather(location)
-        current = weather_info.current.model_dump()
-        alerts = generate_weather_alerts(
-            uv_index=current.get("uv_index", 0.0),
-            humidity=current.get("relative_humidity_2m", 0.0),
-            rain_prob=current.get("rain", 0.0),
-        )
+        alerts = build_weather_alerts(weather_info)
 
         for alert in alerts:
             summary["alerts"] += 1
@@ -520,12 +514,7 @@ async def get_clima_cariri(cidade: str | None = None):
             )
     try:
         weather_info = await fetch_cariri_weather(location)
-        current = weather_info.current.model_dump()
-        alerts = generate_weather_alerts(
-            uv_index=current.get("uv_index", 0.0),
-            humidity=current.get("relative_humidity_2m", 0.0),
-            rain_prob=current.get("rain", 0.0),
-        )
+        alerts = build_weather_alerts(weather_info)
 
         return {"weather": weather_info, "alerts": alerts}
     except (httpx.HTTPError, ValueError) as e:

@@ -21,6 +21,7 @@ from app.services.forecast import (
     build_comparison,
     build_current_forecast,
     build_period_forecast,
+    build_weather_alerts,
 )
 
 
@@ -288,6 +289,23 @@ def test_formato_da_mensagem_do_clima_e_estavel(monkeypatch):
         "🧴 *Índice UV (máx.):* 9.0 (_Muito Alto! Proteja-se do sol_)\n\n"
         "_Dica: Tempo fechado! Leve o guarda-chuva se for sair._ ☂️"
     )
+
+
+def test_alerta_agendado_usa_a_janela_nao_o_instante():
+    """Chuva a 90% na próxima hora alerta mesmo com o instante seco."""
+    weather = WeatherData(
+        latitude=-7.31,
+        longitude=-39.31,
+        current=CurrentWeather(
+            temperature_2m=30.0, relative_humidity_2m=40, rain=0.0, uv_index=5
+        ),
+        minutely_15=_minutely_fixture(),
+    )
+    now = datetime(2026, 9, 23, 13, 10)
+
+    alerts = build_weather_alerts(weather, now=now)
+
+    assert any("Chuva Forte" in alert for alert in alerts)
 
 
 def test_build_comparison_uma_linha_por_cidade(monkeypatch):

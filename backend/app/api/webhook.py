@@ -95,15 +95,6 @@ FORECAST_ERROR_TEXT = (
     "⚠️ Não consegui buscar a previsão agora. Tente novamente em alguns instantes ou contate os desenvolvedores."
 )
 
-FORECAST_ALIASES = (
-    "forecast",
-    "previsao",
-    "previsão",
-    "previzao",
-    "previzão",
-    "clima",
-)
-
 HINT_TEXT = (
     "🤖 Eu sou o *Clima-Zap*! Envie ```/ajuda``` para ver os comandos"
     " (ex: ```/clima```)."
@@ -161,16 +152,6 @@ GPS_PROMPT_TEXT = (
     "📍 Envie sua localização pelo WhatsApp (anexo → Localização) "
     "para definir sua cidade."
 )
-
-
-async def handle_city_command(city_query: str, recipient: str) -> str:
-    """Comando `/cidade [nome]` — atalho de /configuracao para cidades."""
-    if city_query.strip().lower() in ("gps", "--gps", "localizacao", "localização"):
-        await set_awaiting_gps(recipient, True)
-        return GPS_PROMPT_TEXT
-    if not city_query:
-        return await _show_location(recipient)
-    return await _apply_city(recipient, city_query)
 
 
 async def handle_config_command(args: str, recipient: str) -> str:
@@ -295,22 +276,34 @@ WINDOW_OPTIONS = {"1h": 60, "2h": 120, "3h": 180, "4h": 240}
 async def handle_window_command(args: str, recipient: str) -> str:
     """Comando `/janela [1h|2h|3h|4h|padrao]` — janela da previsão on-demand."""
     query = args.strip().lower()
-    options = " · ".join(f"*{key}*" for key in WINDOW_OPTIONS)
-    commands = f"{options} ou *padrao* (ex: ```/janela 2h```)"
+    current = await get_subscriber_window(recipient)
+
     if not query:
-        return (
-            f"⏱️ Janela atual: *{await get_subscriber_window(recipient)} min*\n"
-            f"Opções: {commands}."
+        numbered = "\n".join(
+            f"{index}️⃣ {key} ({minutes} min)"
+            for index, (key, minutes) in enumerate(WINDOW_OPTIONS.items(), start=1)
         )
-    if query in ("padrao", "padrão", "reset"):
+        return (
+            f"⏱️ Janela atual: *{current} min*\n"
+            "Escolha uma janela (envie o número ou o valor):\n"
+            f"{numbered}\n"
+            f"0️⃣ padrão ({settings.forecast_window_minutes} min)\n"
+            "Ex: ```/janela 2h```."
+        )
+
+    if query in ("padrao", "padrão", "reset", "0", "0️⃣"):
         await set_subscriber_window(recipient, None)
         return (
             "✅ Janela da previsão voltou ao padrão "
             f"(*{settings.forecast_window_minutes} min*)."
         )
+
+    if query in ("1", "2", "3", "4"):
+        query = f"{query}h"
     minutes = WINDOW_OPTIONS.get(query)
     if minutes is None:
-        return f"❌ Janela inválida. Opções: {commands}."
+        options = " · ".join(f"*{key}*" for key in WINDOW_OPTIONS)
+        return f"❌ Janela inválida. Opções: {options} ou *padrao*."
     await set_subscriber_window(recipient, minutes)
     group_note = (
         "\n⚠️ Em grupo, a janela vale para todos os membros."
@@ -345,23 +338,20 @@ async def handle_non_command(recipient: str) -> str | None:
 async def route_command(  # pylint: disable=too-many-return-statements
     command: str, args: str, recipient: str
 ) -> str:
-    """Roteia o comando já parseado (ver command_parser) e retorna a resposta."""
-    if command in ("help", "?", "comandos", "ajuda"):
-        return get_help_message()
+    """Roteia o comando canônico (ver `command_parser.COMMAND_ALIASES`)."""
+    if command == "ajuda":
+        return get_help_message(args)
 
-    if command in ("status", "status?"):
+    if command == "status":
         return await handle_status_command()
 
-    if command == "cidade":
-        return await handle_city_command(args, recipient)
-
-    if command in ("configuracao", "configuração", "config"):
+    if command == "configuracao":
         return await handle_config_command(args, recipient)
 
-    if command in ("comparar", "crajubar"):
+    if command == "comparar":
         return await handle_comparar_command(recipient)
 
-    if command in ("janela", "janelas"):
+    if command == "janela":
         return await handle_window_command(args, recipient)
 
     if command in ("inscrever", "sair"):
@@ -370,7 +360,7 @@ async def route_command(  # pylint: disable=too-many-return-statements
     if command == "agendar":
         return await handle_agendar_command(recipient, args)
 
-    if command in FORECAST_ALIASES:
+    if command == "clima":
         return await handle_forecast_command(recipient)
 
     if command == "admin":

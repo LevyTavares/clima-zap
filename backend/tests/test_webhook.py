@@ -93,8 +93,7 @@ def test_extract_location_returns_none_for_invalid_payload(data):
 def test_help_command_returns_bot_menu():
     reply = run_command("/ajuda")
 
-    assert "*/ajuda*" in reply
-    assert "*/cidade <nome>*" in reply
+    assert "*/ajuda [comando]*" in reply
     assert "*/configuracao" in reply
     assert "*/inscrever" in reply
 
@@ -244,6 +243,20 @@ def test_janela_mostra_padrao_e_define(test_database):
 
     assert "60 min" in run_command("/janela padrao")
     assert run(get_subscriber_window(RECIPIENT)) == 60
+
+    # menu numerado: o número escolhe a janela (funciona no Baileys, que não
+    # suporta listas interativas do WhatsApp)
+    assert "1️⃣ 1h (60 min)" in run_command("/janela")
+    assert "120 min" in run_command("/janela 2")
+    assert run(get_subscriber_window(RECIPIENT)) == 120
+    assert "60 min" in run_command("/janela 0")
+    assert run(get_subscriber_window(RECIPIENT)) == 60
+
+
+def test_ajuda_por_comando(test_database):  # pylint: disable=unused-argument
+    reply = run_command("/ajuda janela")
+    assert "/janela [1h|2h|3h|4h|padrao]" in reply
+    assert "/clima" in run_command("/ajuda previzão")
 
 
 def test_comparar_usa_a_janela_e_uma_linha_por_cidade(test_database, monkeypatch):
@@ -435,7 +448,7 @@ def test_webhook_end_to_end_reply(monkeypatch):
 
     assert response.status_code == 200
     assert sent["number"] == "5588111111111"
-    assert "*/ajuda*" in sent["message"]
+    assert "*/ajuda" in sent["message"]
 
 
 def test_webhook_non_command_in_group_gets_no_reply(monkeypatch):
@@ -505,7 +518,7 @@ def test_webhook_delega_processamento_para_o_wait_until(monkeypatch):
     asyncio.run(delegated[0]())  # o trabalho continua fora do request
 
     assert sent["number"] == "5588333333333"
-    assert "*/ajuda*" in sent["message"]
+    assert "*/ajuda" in sent["message"]
 
 
 def test_webhook_non_command_dm_gets_hint_only_once(monkeypatch):
@@ -569,7 +582,7 @@ def test_webhook_native_mention_runs_command(monkeypatch):
 
     assert response.status_code == 200
     assert len(sent) == 1
-    assert "*/ajuda*" in sent[0][1]
+    assert "*/ajuda" in sent[0][1]
 
 
 def test_webhook_open_when_token_unset(monkeypatch):

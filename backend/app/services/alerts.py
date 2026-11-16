@@ -1,3 +1,9 @@
+# Janela avaliada pelos alertas agendados (3h): cobre o intervalo até o
+# próximo alerta (06/08/12/14/16/18h) e usa a mesma agregação do /clima —
+# média de umidade, pico de chuva e UV máximo da janela, nunca o instante.
+ALERT_WINDOW_MINUTES = 180
+
+
 def generate_weather_alerts(
     uv_index: float, humidity: float, rain_prob: float | None
 ) -> list[str]:

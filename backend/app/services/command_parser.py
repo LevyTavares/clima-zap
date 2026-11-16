@@ -27,13 +27,41 @@ class Invocation(NamedTuple):
     args: str
 
 
+# Aliases aceitos por comando. O nome canônico é o usado pelo roteador e pela
+# ajuda (`/ajuda <comando>`); o resto é atalho histórico mantido porque já foi
+# divulgado (o menu mostra só o canônico).
+COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
+    "ajuda": ("help", "?", "comandos"),
+    "clima": ("forecast", "previsao", "previsão", "previzao", "previzão"),
+    "comparar": ("crajubar",),
+    "configuracao": ("config", "configuração", "cidade"),
+    "inscrever": (),
+    "sair": (),
+    "janela": ("janelas",),
+    "agendar": (),
+    "status": ("status?",),
+    "admin": (),
+}
+
+_CANONICAL_BY_ALIAS = {
+    alias: canonical
+    for canonical, aliases in COMMAND_ALIASES.items()
+    for alias in (canonical, *aliases)
+}
+
+
+def canonical_command(name: str) -> str:
+    """Nome canônico do comando (``previzão`` → ``clima``); desconhecido passa igual."""
+    return _CANONICAL_BY_ALIAS.get(name.strip().lstrip("/").lower(), name)
+
+
 def _split_command(body: str) -> Invocation | None:
-    """Quebra ``"cidade Crato"`` em (cidade, Crato); None se vazio."""
+    """Quebra ``"cidade Crato"`` em (configuracao, Crato); None se vazio."""
     body = body.strip()
     if not body:
         return None
     command, _, args = body.partition(" ")
-    command = command.lower().strip()
+    command = canonical_command(command.lower().strip())
     if not command:
         return None
     return Invocation(command, args.strip())
@@ -64,7 +92,7 @@ def _literal_mention(text: str) -> Invocation | None:
         return None
     rest = text[boundary:].strip()
     # Menção vazia ("@clima-zap") → menu.
-    return _split_command(rest) or Invocation("help", "")
+    return _split_command(rest) or Invocation("ajuda", "")
 
 
 def parse_invocation(
@@ -87,7 +115,7 @@ def parse_invocation(
         while body.startswith("@"):
             _, _, body = body.partition(" ")
             body = body.strip()
-        return _split_command(body) or Invocation("help", "")
+        return _split_command(body) or Invocation("ajuda", "")
 
     # 3) forma textual @<bot_name> comando [args]
     return _literal_mention(text)

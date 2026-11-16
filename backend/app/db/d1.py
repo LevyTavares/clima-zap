@@ -15,6 +15,7 @@ só leem ``phone``/``id``.
 import time
 
 from app.core import worker_runtime
+from app.db.columns import SUBSCRIBER_COLUMNS
 from app.domain import Subscriber
 from app.services import subscription_messages as messages
 
@@ -57,21 +58,40 @@ def _changes(result: object) -> int:
 
 
 def _row_to_subscriber(row: dict) -> Subscriber:
-    return Subscriber(
-        id=row["id"],
-        phone=row["phone"],
-        name=row.get("name"),
-        city=row.get("city"),
-        latitude=row.get("latitude"),
-        longitude=row.get("longitude"),
-        is_active=bool(row.get("is_active", 0)),
-        receive_alerts=bool(row.get("receive_alerts", 0)),
-        receive_bulletins=bool(row.get("receive_bulletins", 0)),
-        bulletin_time=row.get("bulletin_time"),
-        awaiting_gps=bool(row.get("awaiting_gps", 0)),
-        gps_expires_at=row.get("gps_expires_at"),
-        window_minutes=row.get("window_minutes"),
-    )
+    """Monta o domínio a partir da linha do D1 (colunas em ``SUBSCRIBER_COLUMNS``)."""
+    values = {}
+    for column in SUBSCRIBER_COLUMNS:
+        value = row.get(column.name, column.default)
+        values[column.name] = (
+            column.converter(value) if column.converter is not None else value
+        )
+    return Subscriber(**values)
+
+
+async def _insert_subscriber(phone: str, **values: object) -> None:
+    """INSERT com as colunas informadas; o resto fica no default da tabela."""
+    columns = ["phone", *values]
+    placeholders = ", ".join("?" for _ in columns)
+    await _db().prepare(
+        f"INSERT INTO subscribers ({', '.join(columns)}) VALUES ({placeholders})"
+    ).bind(phone, *values.values()).run()
+
+
+async def _update_subscriber(phone: str, **values: object) -> None:
+    """UPDATE só das colunas informadas."""
+    sets = ", ".join(f"{column} = ?" for column in values)
+    await _db().prepare(
+        f"UPDATE subscribers SET {sets} WHERE phone = ?"
+    ).bind(*values.values(), phone).run()
+
+
+async def _save_subscriber(phone: str, **values: object) -> None:
+    """Cria a linha (inativa, como os fluxos de configuração esperam) ou atualiza."""
+    if await find_subscriber(phone) is None:
+        values.setdefault("is_active", 0)
+        await _insert_subscriber(phone, **values)
+    else:
+        await _update_subscriber(phone, **values)
 
 
 async def find_subscriber(phone: str) -> Subscriber | None:
@@ -108,30 +128,22 @@ async def subscribe_recipient(phone: str, name: str | None = None, kinds=None) -
     new_active = new_alerts or new_bulletins
 
     if subscriber is None:
-        await _db().prepare(
-            "INSERT INTO subscribers (phone, name, is_active, receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 0, NULL)"
-        ).bind(
+        await _insert_subscriber(
             phone,
-            clean_name,
-            1 if new_active else 0,
-            1 if new_alerts else 0,
-            1 if new_bulletins else 0,
-        ).run()
+            name=clean_name,
+            is_active=1 if new_active else 0,
+            receive_alerts=1 if new_alerts else 0,
+            receive_bulletins=1 if new_bulletins else 0,
+        )
     else:
-        sets = ["is_active = ?", "receive_alerts = ?", "receive_bulletins = ?"]
-        params: list[object] = [
-            1 if new_active else 0,
-            1 if new_alerts else 0,
-            1 if new_bulletins else 0,
-        ]
+        values: dict[str, object] = {
+            "is_active": 1 if new_active else 0,
+            "receive_alerts": 1 if new_alerts else 0,
+            "receive_bulletins": 1 if new_bulletins else 0,
+        }
         if clean_name is not None:
-            sets.append("name = ?")
-            params.append(clean_name)
-        params.append(phone)
-        await _db().prepare(
-            f"UPDATE subscribers SET {', '.join(sets)} WHERE phone = ?"
-        ).bind(*params).run()
+            values["name"] = clean_name
+        await _update_subscriber(phone, **values)
 
     return messages.subscribed(phone, wanted)
 
@@ -160,15 +172,12 @@ async def unsubscribe_recipient(phone: str, kinds=None) -> dict:
     )
     new_active = new_alerts or new_bulletins
 
-    await _db().prepare(
-        "UPDATE subscribers SET is_active = ?, receive_alerts = ?, receive_bulletins = ? "
-        "WHERE phone = ?"
-    ).bind(
-        1 if new_active else 0,
-        1 if new_alerts else 0,
-        1 if new_bulletins else 0,
+    await _update_subscriber(
         phone,
-    ).run()
+        is_active=1 if new_active else 0,
+        receive_alerts=1 if new_alerts else 0,
+        receive_bulletins=1 if new_bulletins else 0,
+    )
     return messages.unsubscribed(phone, wanted)
 
 
@@ -176,83 +185,40 @@ async def set_subscriber_location(
     phone: str, name: str, latitude: float, longitude: float
 ) -> None:
     """Grava o local do destinatário (nome + coords); cria o registro se preciso."""
-    subscriber = await find_subscriber(phone)
-
-    if subscriber is None:
-        await _db().prepare(
-            "INSERT INTO subscribers (phone, city, latitude, longitude, is_active, "
-            "receive_alerts, receive_bulletins, bulletin_time, awaiting_gps, gps_expires_at) VALUES (?, ?, ?, ?, 0, 0, 0, NULL, 0, NULL)"
-        ).bind(phone, name, latitude, longitude).run()
-    else:
-        await _db().prepare(
-            "UPDATE subscribers SET city = ?, latitude = ?, longitude = ?"
-            " WHERE phone = ?"
-        ).bind(name, latitude, longitude, phone).run()
+    await _save_subscriber(phone, city=name, latitude=latitude, longitude=longitude)
 
 
 async def clear_subscriber_location(phone: str) -> None:
     """Remove o local definido (volta à região padrão; a inscrição permanece)."""
-    await _db().prepare(
-        "UPDATE subscribers SET city = NULL, latitude = NULL, longitude = NULL"
-        " WHERE phone = ?"
-    ).bind(phone).run()
+    await _update_subscriber(phone, city=None, latitude=None, longitude=None)
 
 
 async def set_bulletin_time(phone: str, time_str: str | None) -> None:
     """Define (ou limpa) o horário personalizado de boletim do grupo."""
-    subscriber = await find_subscriber(phone)
-    if subscriber is None:
-        await _db().prepare(
-            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, bulletin_time) "
-            "VALUES (?, 0, 0, 0, ?)"
-        ).bind(phone, time_str).run()
-    else:
-        await _db().prepare(
-            "UPDATE subscribers SET bulletin_time = ? WHERE phone = ?"
-        ).bind(time_str, phone).run()
+    await _save_subscriber(phone, bulletin_time=time_str)
 
 
 async def set_window_minutes(phone: str, minutes: int | None) -> None:
     """Define a janela (min) da previsão on-demand do contato."""
-    subscriber = await find_subscriber(phone)
-    if subscriber is None:
-        await _db().prepare(
-            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, window_minutes) "
-            "VALUES (?, 0, 0, 0, ?)"
-        ).bind(phone, minutes).run()
-    else:
-        await _db().prepare(
-            "UPDATE subscribers SET window_minutes = ? WHERE phone = ?"
-        ).bind(minutes, phone).run()
+    await _save_subscriber(phone, window_minutes=minutes)
 
 
 async def set_awaiting_gps(phone: str, value: bool, expires: float | None = None) -> None:
     """Marca (ou desmarca) o destinatário aguardando envio de localização."""
-    subscriber = await find_subscriber(phone)
-    if subscriber is None:
-        await _db().prepare(
-            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, awaiting_gps, gps_expires_at) "
-            "VALUES (?, 0, 0, 0, ?, ?)"
-        ).bind(phone, 1 if value else 0, expires).run()
-    else:
-        await _db().prepare(
-            "UPDATE subscribers SET awaiting_gps = ?, gps_expires_at = ? WHERE phone = ?"
-        ).bind(1 if value else 0, expires, phone).run()
+    await _save_subscriber(
+        phone, awaiting_gps=1 if value else 0, gps_expires_at=expires
+    )
 
 
 async def is_awaiting_gps(phone: str, now: float | None = None) -> bool:
     """True se o destinatário está aguardando envio de localização (e não expirou)."""
-    import time as _time
-
     if now is None:
-        now = _time.time()
+        now = time.time()
     subscriber = await find_subscriber(phone)
     if not subscriber or not subscriber.awaiting_gps:
         return False
     if subscriber.gps_expires_at and now > subscriber.gps_expires_at:
-        await _db().prepare(
-            "UPDATE subscribers SET awaiting_gps = 0, gps_expires_at = NULL WHERE phone = ?"
-        ).bind(phone).run()
+        await _update_subscriber(phone, awaiting_gps=0, gps_expires_at=None)
         return False
     return True
 

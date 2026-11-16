@@ -22,12 +22,14 @@ def bot_identity(monkeypatch):
 def test_slash_form_parses_command_and_args():
     assert parse_invocation("/Ajuda ") == ("ajuda", "")
     assert parse_invocation("  /CLIMA") == ("clima", "")
-    assert parse_invocation("/cidade Crato") == ("cidade", "Crato")
+    assert parse_invocation("/cidade Crato") == ("configuracao", "Crato")
     assert parse_invocation("/configuracao -7.23,-39.31") == (
         "configuracao",
         "-7.23,-39.31",
     )
-    assert parse_invocation("/?") == ("?", "")
+    assert parse_invocation("/?") == ("ajuda", "")
+    assert parse_invocation("/previzão") == ("clima", "")
+    assert parse_invocation("/janelas 2h") == ("janela", "2h")
     assert parse_invocation("/") is None
     assert parse_invocation("") is None
 
@@ -42,10 +44,10 @@ def test_bare_text_is_not_a_command():
 
 
 def test_literal_mention_form():
-    assert parse_invocation("@clima-zap previsao") == ("previsao", "")
-    assert parse_invocation("@Clima-Zap cidade Crato") == ("cidade", "Crato")
+    assert parse_invocation("@clima-zap previsao") == ("clima", "")
+    assert parse_invocation("@Clima-Zap cidade Crato") == ("configuracao", "Crato")
     # menção vazia abre o menu
-    assert parse_invocation("@clima-zap") == ("help", "")
+    assert parse_invocation("@clima-zap") == ("ajuda", "")
     # fronteira de palavra: sufixo colado não invoca o bot
     assert parse_invocation("@clima-zapinho clima") is None
 
@@ -54,11 +56,11 @@ def test_native_mention_form():
     mentioned = [BOT_JID]
     assert parse_invocation("@5588000000000 clima", mentioned) == ("clima", "")
     assert parse_invocation("@5588000000000 previsao", mentioned) == (
-        "previsao",
+        "clima",
         "",
     )
     # só a menção → menu
-    assert parse_invocation("@5588000000000", mentioned) == ("help", "")
+    assert parse_invocation("@5588000000000", mentioned) == ("ajuda", "")
     # menção nativa dispensa o "@" inicial: bot mencionado + texto é comando
     assert parse_invocation("clima", mentioned) == ("clima", "")
     # sem o bot nas menções, "@número ..." não é invocação

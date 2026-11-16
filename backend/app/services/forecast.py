@@ -15,7 +15,7 @@ from app.formatter import (
     format_window_summary,
 )
 from app.schemas.schemas import WeatherData
-from app.services.alerts import generate_weather_alerts
+from app.services.alerts import ALERT_WINDOW_MINUTES, generate_weather_alerts
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -125,6 +125,24 @@ async def build_current_forecast(
     if alerts:
         summary += "\n\n" + "\n".join(alerts)
     return summary
+
+
+def build_weather_alerts(
+    weather: WeatherData,
+    window_minutes: int = ALERT_WINDOW_MINUTES,
+    now: datetime | None = None,
+) -> list[str]:
+    """Alertas agendados: agregam a janela de 3h, não o instante atual.
+
+    Mesma função de agregação do `/clima`, então os dois não discordam sobre o
+    mesmo céu (o horizonte muda, a métrica não).
+    """
+    agg = aggregate_window(weather, window_minutes, now or local_now())
+    return generate_weather_alerts(
+        uv_index=agg["uv_index"],
+        humidity=agg["humidity"],
+        rain_prob=agg["rain_prob"],
+    )
 
 
 async def build_comparison(
