@@ -10,6 +10,7 @@ __pycache__/
 *.db
 
 # Cloudflare Workers (pywrangler)
+.wrangler/
 backend/.dev.vars
 backend/python_modules/
 backend/.venv-workers/
