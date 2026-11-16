@@ -665,7 +665,7 @@ Testes da suíte principal:
 
 | Arquivo | Testes | Cobre |
 |---------|--------|-------|
-| `tests/test_webhook.py` | 22 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/comparar`, `/inscrever`, `/sair`, `/clima`), `extract_location`, aguardo de GPS (pin só vale após `/configuracao gps`), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
+| `tests/test_webhook.py` | 23 | Roteamento de comandos (`/ajuda`, `/cidade`, `/configuracao`, `/comparar`, `/inscrever`, `/sair`, `/clima`), `extract_location`, aguardo de GPS (pin só vale após `/configuracao gps`, expira em 2 min), silêncio em grupo, dica única no privado, menção nativa, fluxo completo webhook→resposta, autenticação `Bearer` e fail closed (503) em produção sem token |
 | `tests/test_d1_store.py` | 25 | Caminho Cloudflare Workers: bridge do runtime (env→settings, `brt_hour`), persistência em D1 (assinantes, localização, dedupe, dica), alert history, sessões administrativas e conversão FFI |
 | `tests/test_admin_commands.py` | 22 | `/admin` (registro de 7 dias, sessão, senha avulsa, allowlist opcional, só privado): status, boletim sob demanda, alertas, grupos, ping, logout, ajuda e redação da senha nos logs |
 | `tests/test_admin_sessions.py` | 4 | Sessões administrativas no banco local: criação/renovação/expiração, logout e aviso de vencimento (uma vez; retry em falha) |
