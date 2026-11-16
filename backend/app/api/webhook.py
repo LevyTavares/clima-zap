@@ -382,14 +382,14 @@ async def process_event_background(payload: WebhookPayload):
     # não sobrescreve a cidade escolhida.
     if loc_data is not None and recipient and await is_awaiting_gps(recipient):
         lat, lon, loc_name = loc_data
-        place = loc_name or f"GPS ({lat:g}, {lon:g})"
+        place = loc_name or f"{lat:g}, {lon:g}"
         await set_subscriber_location(recipient, place, lat, lon)
         await set_awaiting_gps(recipient, False)
         try:
             await send_whatsapp_message(
                 recipient,
-                f"📍 Localização recebida e salva: *{place}*!\n"
-                "Envie ```/clima``` para ver a previsão do tempo atualizada.",
+                f"✅ Localização definida: *{place}* ({lat:g}, {lon:g})!\n"
+                "Envie ```/clima``` para ver a previsão da sua região.",
             )
         except EvolutionError as error:
             logger.error("Erro ao enviar feedback de GPS para %s: %s", recipient, error)
