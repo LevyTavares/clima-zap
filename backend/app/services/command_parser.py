@@ -34,7 +34,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "ajuda": ("help", "?", "comandos"),
     "clima": ("forecast", "previsao", "previsão", "previzao", "previzão"),
     "comparar": ("crajubar",),
-    "configuracao": ("config", "configuração", "cidade"),
+    "configurar": ("configuracao", "configuração", "config", "cidade"),
     "inscrever": (),
     "sair": (),
     "janela": ("janelas",),
@@ -56,7 +56,7 @@ def canonical_command(name: str) -> str:
 
 
 def _split_command(body: str) -> Invocation | None:
-    """Quebra ``"cidade Crato"`` em (configuracao, Crato); None se vazio."""
+    """Quebra ``"cidade Crato"`` em (configurar, Crato); None se vazio."""
     body = body.strip()
     if not body:
         return None

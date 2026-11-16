@@ -103,7 +103,7 @@ Evolution API sends POST to `/api/v1/webhook`:
 
 Commands are recognized in **two invocation forms** only:
 
-1. `/command [args]` — e.g. `/clima`, `/configuracao Crato`;
+1. `/command [args]` — e.g. `/clima`, `/configurar Crato`;
 2. `@clima-zap command [args]` — the bot name comes from `BOT_NAME`; a native WhatsApp mention (`@number`) also counts and requires `TARGET_PHONE_NUMBER` (the bot's own number).
 
 Aliases are normalized in one place (`COMMAND_ALIASES` in `app/services/command_parser.py`); the menu only advertises the canonical name.
@@ -113,14 +113,14 @@ Aliases are normalized in one place (`COMMAND_ALIASES` in `app/services/command_
 | `/ajuda`, `/help`, `/?`, `/comandos` | Help menu built from the single `COMMANDS` list |
 | `/ajuda <command>` | Help for one command; accepts aliases (`/ajuda previzão`) |
 | `/status`, `/status?` | System status |
-| `/clima`, `/forecast`, `/previsao`, `/previsão`, `/previzao`, `/previzão` | Weather forecast + active alerts (uses the location set via `/configuracao`) |
+| `/clima`, `/forecast`, `/previsao`, `/previsão`, `/previzao`, `/previzão` | Weather forecast + active alerts (uses the location set via `/configurar`) |
 | `/comparar`, `/crajubar` | One line per Crajubar city, same window |
-| `/configuracao` | Show the current location (default region when unset) and the numbered city menu |
-| `/configuracao <city>` | Set the location — Crajubar presets or any city (Open-Meteo geocoder) |
-| `/configuracao <lat,lon>` | Set by coordinates (e.g. `/configuracao -7.23, -39.31`) |
-| `/configuracao gps` | Wait 2 min for a WhatsApp location pin |
-| `/configuracao padrao` | Clear the location and return to the default region |
-| `/cidade …` | Alias of `/configuracao` (same validations) |
+| `/configurar` | Show the current location (default region when unset) and the numbered city menu |
+| `/configurar <city>` | Set the location — Crajubar presets or any city (Open-Meteo geocoder) |
+| `/configurar <lat,lon>` | Set by coordinates (e.g. `/configurar -7.23, -39.31`) |
+| `/configurar gps` | Wait 2 min for a WhatsApp location pin |
+| `/configurar padrao` | Clear the location and return to the default region |
+| `/configuracao …`, `/cidade …` | Aliases of `/configurar` (same validations) |
 | `/janela [1h\|2h\|3h\|4h\|padrao]` | Forecast window for `/clima` and `/comparar`; no argument shows the numbered options (`1`–`4`, `0` = default) |
 | `/inscrever [alertas\|boletins\|todos]` | Subscribe the contact to weather alerts and/or bulletins |
 | `/sair [alertas\|boletins\|todos]` | Unsubscribe from the given types |
@@ -136,7 +136,7 @@ If `WEBHOOK_AUTH_TOKEN` is set, `POST /api/v1/webhook` requires the header `Auth
 
 ## Periodic Group Forecast
 
-On Docker the backend registers three APScheduler jobs; on Cloudflare Workers the same hours are Cron Triggers (`backend/worker.py`) sharing `app/core/schedule.py`. They push a period bulletin to `FORECAST_GROUP_JID` (when set) **and to every active group subscriber** — groups that ran `/inscrever` (JID ending in `@g.us`). Each group receives the bulletin for its own saved location (`/configuracao`); groups without a location get the default region, and targets are deduplicated.
+On Docker the backend registers three APScheduler jobs; on Cloudflare Workers the same hours are Cron Triggers (`backend/worker.py`) sharing `app/core/schedule.py`. They push a period bulletin to `FORECAST_GROUP_JID` (when set) **and to every active group subscriber** — groups that ran `/inscrever` (JID ending in `@g.us`). Each group receives the bulletin for its own saved location (`/configurar`); groups without a location get the default region, and targets are deduplicated.
 
 | Job | Base hour (America/Fortaleza) | Period covered | Jitter |
 |-----|------------------------------|----------------|--------|

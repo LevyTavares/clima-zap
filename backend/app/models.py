@@ -12,7 +12,7 @@ class Subscriber(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    # Local definido pelo bot (/configuracao): nome (cidade geocodificada ou
+    # Local definido pelo bot (/configurar): nome (cidade geocodificada ou
     # "lat, lon") + coordenadas; None = região padrão. Linhas antigas podem ter
     # só a cidade preset (sem coordenadas).
     city: Mapped[str | None] = mapped_column(String(64), nullable=True)

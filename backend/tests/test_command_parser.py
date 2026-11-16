@@ -22,9 +22,10 @@ def bot_identity(monkeypatch):
 def test_slash_form_parses_command_and_args():
     assert parse_invocation("/Ajuda ") == ("ajuda", "")
     assert parse_invocation("  /CLIMA") == ("clima", "")
-    assert parse_invocation("/cidade Crato") == ("configuracao", "Crato")
-    assert parse_invocation("/configuracao -7.23,-39.31") == (
-        "configuracao",
+    assert parse_invocation("/cidade Crato") == ("configurar", "Crato")
+    assert parse_invocation("/configuracao Crato") == ("configurar", "Crato")
+    assert parse_invocation("/configurar -7.23,-39.31") == (
+        "configurar",
         "-7.23,-39.31",
     )
     assert parse_invocation("/?") == ("ajuda", "")
@@ -45,7 +46,7 @@ def test_bare_text_is_not_a_command():
 
 def test_literal_mention_form():
     assert parse_invocation("@clima-zap previsao") == ("clima", "")
-    assert parse_invocation("@Clima-Zap cidade Crato") == ("configuracao", "Crato")
+    assert parse_invocation("@Clima-Zap cidade Crato") == ("configurar", "Crato")
     # menção vazia abre o menu
     assert parse_invocation("@clima-zap") == ("ajuda", "")
     # fronteira de palavra: sufixo colado não invoca o bot

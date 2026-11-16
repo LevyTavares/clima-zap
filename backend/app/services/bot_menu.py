@@ -8,9 +8,10 @@ COMMANDS: list[tuple[str, str, str]] = [
     ("clima", "/clima", "Previsão da sua localização na janela do /janela."),
     ("comparar", "/comparar", "Barbalha, Juazeiro do Norte e Crato lado a lado."),
     (
-        "configuracao",
-        "/configuracao [cidade | lat,lon | gps | padrao]",
-        "Define o local; sem argumento mostra as opções numeradas (/cidade é atalho).",
+        "configurar",
+        "/configurar [cidade | lat,lon | gps | padrao]",
+        "Define o local; sem argumento mostra as opções numeradas"
+        " (/configuracao e /cidade são atalhos).",
     ),
     (
         "janela",

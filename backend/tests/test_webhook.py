@@ -94,7 +94,7 @@ def test_help_command_returns_bot_menu():
     reply = run_command("/ajuda")
 
     assert "*/ajuda [comando]*" in reply
-    assert "*/configuracao" in reply
+    assert "*/configurar" in reply
     assert "*/inscrever" in reply
 
 
@@ -111,7 +111,7 @@ def test_set_and_show_city(test_database):
 
     show_reply = run_command("/cidade")
     assert "*Crato*" in show_reply
-    assert "/configuracao" in show_reply
+    assert "/configurar" in show_reply
 
     city, latitude, longitude = read_location(test_database, RECIPIENT)
     assert city == "Crato"
@@ -129,10 +129,10 @@ def test_set_and_show_city(test_database):
 
 
 def test_configuracao_with_coordinates(test_database):
-    set_reply = run_command("/configuracao -7.23,-39.31")
+    set_reply = run_command("/configurar -7.23,-39.31")
     assert "*-7.23, -39.31*" in set_reply
 
-    show_reply = run_command("/configuracao")
+    show_reply = run_command("/configurar")
     assert "*-7.23, -39.31*" in show_reply
 
     city, latitude, longitude = read_location(test_database, RECIPIENT)
@@ -143,19 +143,28 @@ def test_configuracao_with_coordinates(test_database):
 
 def test_configuracao_reset_returns_to_default(test_database):
     run_command("/cidade crato")
-    reset_reply = run_command("/configuracao padrao")
+    reset_reply = run_command("/configurar padrao")
 
     assert "padrão" in reset_reply
 
     city, latitude, longitude = read_location(test_database, RECIPIENT)
     assert (city, latitude, longitude) == (None, None, None)
 
-    show_reply = run_command("/configuracao")
+    show_reply = run_command("/configurar")
     assert "Nenhum local definido" in show_reply
 
 
+def test_configuracao_antigo_continua_valendo(test_database):
+    """`/configuracao` foi renomeado para `/configurar`, mas segue como atalho."""
+    reply = run_command("/configuracao Crato")
+
+    assert "*Crato*" in reply
+    city, _, _ = read_location(test_database, RECIPIENT)
+    assert city == "Crato"
+
+
 def test_configuracao_gps_aguarda_localizacao(test_database):
-    reply = run_command("/configuracao gps")
+    reply = run_command("/configurar gps")
 
     assert "Envie sua localização" in reply
     assert run(is_awaiting_gps(RECIPIENT)) is True
@@ -196,7 +205,7 @@ def test_pin_so_sobrescreve_local_quando_aguardando(test_database, monkeypatch):
     assert read_location(test_database, RECIPIENT)[0] == "Crato"
     assert sent == []
 
-    run_command("/configuracao gps")
+    run_command("/configurar gps")
     client.post("/api/v1/webhook", json=payload("TEST-GPS-2"))
 
     assert read_location(test_database, RECIPIENT)[0] == "Barbalha"
@@ -298,7 +307,7 @@ def test_configuracao_geocodes_cities_outside_presets(test_database, monkeypatch
 
     monkeypatch.setattr("app.api.webhook.geocode_city", fake_geocode)
 
-    reply = run_command("/configuracao fortaleza")
+    reply = run_command("/configurar fortaleza")
     assert "*Fortaleza, Ceará*" in reply
 
     city, latitude, longitude = read_location(test_database, RECIPIENT)
@@ -316,7 +325,7 @@ def test_configuracao_geocodes_multiword_city(test_database, monkeypatch):
 
     monkeypatch.setattr("app.api.webhook.geocode_city", fake_geocode)
 
-    reply = run_command("/configuracao brejo santo")
+    reply = run_command("/configurar brejo santo")
     assert "*Brejo Santo, Ceará*" in reply
 
     city, latitude, longitude = read_location(test_database, RECIPIENT)
@@ -331,7 +340,7 @@ def test_unknown_local_lists_options_when_geocode_misses(monkeypatch):
 
     monkeypatch.setattr("app.api.webhook.geocode_city", fake_geocode)
 
-    reply = run_command("/configuracao Atlantis")
+    reply = run_command("/configurar Atlantis")
 
     assert "não encontrado" in reply
     assert "Barbalha" in reply

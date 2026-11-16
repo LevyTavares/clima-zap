@@ -1,7 +1,7 @@
 """Geocodificação de cidades fora dos presets do Crajubar.
 
 Usa o geocoder aberto da própria Open-Meteo (mesma família da API de previsão,
-sem API key). Alimenta o comando ``/configuracao <cidade>`` para qualquer
+sem API key). Alimenta o comando ``/configurar <cidade>`` para qualquer
 cidade do mundo quando ela não casa com ``match_city``.
 """
 

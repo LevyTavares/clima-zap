@@ -1,7 +1,7 @@
 """Persistência de assinantes: inscrição, localização e dedupe.
 
 Compartilhado pela API REST (`POST /api/v1/subscribe`), pelos comandos do
-bot (`/inscrever`, `/sair`, `/configuracao`, `/cidade`) e pelo webhook
+bot (`/inscrever`, `/sair`, `/configurar`, `/cidade`) e pelo webhook
 (dedupe de eventos + dica única no privado).
 
 Dois backends, mesma API:

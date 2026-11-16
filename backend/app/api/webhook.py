@@ -124,8 +124,8 @@ async def _show_location(recipient: str) -> str:
         f"{_location_summary(location)}\n"
         "Escolha a cidade da região Crajubar (envie o número):\n"
         f"{numbered}\n"
-        "Ou use ```/configuracao <cidade | lat,lon>``` "
-        "(ex: ```/configuracao Crato``` ou ```/configuracao 2```)."
+        "Ou use ```/configurar <cidade | lat,lon>``` "
+        "(ex: ```/configurar Crato``` ou ```/configurar 2```)."
     )
 
 
@@ -137,7 +137,7 @@ async def _apply_city(recipient: str, city_query: str) -> str:
         return (
             f"❓ Local não encontrado: *{city_query}*.\n"
             f"Cidades de referência: {options}.\n"
-            "Também use coordenadas: ```/configuracao -7.23, -39.31```."
+            "Também use coordenadas: ```/configurar -7.23, -39.31```."
         )
     await set_subscriber_location(
         recipient, location["name"], location["latitude"], location["longitude"]
@@ -155,7 +155,7 @@ GPS_PROMPT_TEXT = (
 
 
 async def handle_config_command(args: str, recipient: str) -> str:
-    """Comando `/configuracao [cidade | lat,lon | gps | padrao]`."""
+    """Comando `/configurar [cidade | lat,lon | gps | padrao]`."""
     query = args.strip()
     if not query:
         return await _show_location(recipient)
@@ -345,7 +345,7 @@ async def route_command(  # pylint: disable=too-many-return-statements
     if command == "status":
         return await handle_status_command()
 
-    if command == "configuracao":
+    if command == "configurar":
         return await handle_config_command(args, recipient)
 
     if command == "comparar":
@@ -407,7 +407,7 @@ async def process_event_background(  # pylint: disable=too-many-locals,too-many-
     recipient = recipient_key(sender) if sender else ""
 
     # Fluxo GPS: só grava a localização quando o contato pediu com
-    # `/configuracao gps` (aguardo de 2 min). Pin enviado por outro motivo
+    # `/configurar gps` (aguardo de 2 min). Pin enviado por outro motivo
     # não sobrescreve a cidade escolhida.
     if loc_data is not None and recipient and await is_awaiting_gps(recipient):
         lat, lon, loc_name = loc_data

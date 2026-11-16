@@ -6,7 +6,7 @@ def test_get_help_message_content():
 
     assert "Clima-Zap" in help_text
     assert "*/clima*" in help_text
-    assert "*/configuracao" in help_text
+    assert "*/configurar" in help_text
     assert "*/inscrever" in help_text
     assert "*/sair" in help_text
     assert "*/ajuda [comando]*" in help_text
@@ -14,4 +14,5 @@ def test_get_help_message_content():
     janela = get_help_message("janelas")
     assert "Janela da previsão" in janela
     assert "/clima" in get_help_message("/previzão")
+    assert "/configurar" in get_help_message("configuracao")
     assert "Comando desconhecido" in get_help_message("inexistente")
