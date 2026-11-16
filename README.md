@@ -27,21 +27,60 @@ As regras são aplicadas em três pontos: endpoint `/api/v1/clima/cariri`, sched
 
 ## ✅ Funcionalidades
 
-- **API REST** com health checks (`/`, `/health`, `/api/v1/clima/ping`)
-- **Previsão em tempo real** da região do Cariri com geração de alertas (`/api/v1/clima/cariri`)
-- **Motor de regras** de alerta preventivo (UV, umidade, chuva) com mensagens formatadas em Markdown de WhatsApp
-- **Alertas agendados** — 6 verificações diárias (06h, 08h, 12h, 14h, 16h, 18h — fuso `America/Fortaleza`): APScheduler no Docker, Cron Triggers no Workers
-- **Boletim periódico no grupo WhatsApp** — 3×/dia (manhã 06h, tarde 14h, noite 20h) com jitter 0–15min, alvo via `FORECAST_GROUP_JID`
-- **Webhook do WhatsApp** (`POST /api/v1/webhook`) com processamento assíncrono — `BackgroundTasks` no Docker e `ctx.waitUntil` no Workers (a Evolution recebe o `200` antes do processamento) —, normalização de eventos e deduplicação de mensagens (TTL 5 min)
-- **Bot de WhatsApp** com gramática estrita — comandos só valem como `/comando` ou `@clima-zap comando`: `ajuda`, `status`, `clima`, `configuracao`, `cidade`, `inscrever`, `sair` (em grupo só responde a comandos; no privado, dica única)
-- **Envio de mensagens** pelo WhatsApp via Evolution API (SDK `evolution-whatsapp`)
-- **Verificação de sessão** do WhatsApp (`/instance/connectionState`)
-- **Formatadores de mensagem** (resumo diário, alerta urgente, saudações aleatórias)
-- **Documentação servida pela API** (`/docs/whatsapp`, `/docs/docker`) além do Swagger automático
-- **Stack Docker Compose completa** — PostgreSQL + Redis + Evolution API + Backend + Frontend
-- **CI com GitHub Actions** executando a suíte de testes
-- **Persistência de assinantes e alertas** com SQLAlchemy assíncrono, SQLite/PostgreSQL e migrations Alembic
-- **Cache curto (10 min)** por local nas consultas à Open-Meteo e **retenção de 90 dias** do histórico de envios (`alert_logs`)
+### 🌦️ Clima e alertas
+
+- **Previsão Open-Meteo** (sem API key): condições atuais (temperatura, umidade, chuva, UV), máximas/mínimas do dia e série horária (precipitação, UV, `weather_code`) para 2 dias, fuso `America/Fortaleza`
+- **Motor de regras preventivas** — UV ≥ 8.0, umidade ≤ 30%, chuva ≥ 70% — aplicado no endpoint, nos jobs agendados e no comando `/clima`, com texto em Markdown de WhatsApp
+- **Local por assinante**: presets do Crajubar (Barbalha, Juazeiro do Norte, Crato por nome, número ou emoji), qualquer cidade pelo geocoder da Open-Meteo, coordenadas `lat,lon`, localização GPS enviada no chat, e `/configuracao padrao` para voltar à região padrão
+- **`/comparar`** — previsão simultânea das 3 cidades do Crajubar em uma única mensagem (builds em paralelo)
+- **Cache em memória por local** (10 min) nas consultas à Open-Meteo
+
+### 💬 Bot de WhatsApp
+
+- **Gramática estrita**: comandos só valem como `/comando` ou `@clima-zap comando` (nome de `BOT_NAME`, ou menção nativa com `TARGET_PHONE_NUMBER`); em grupo o bot fica calado fora de comandos, no privado envia uma dica única de `/ajuda`
+- **Comandos**: `/ajuda`, `/status`, `/clima` (aliases `forecast`/`previsao`/…), `/configuracao`, `/cidade`, `/comparar`, `/inscrever`, `/sair`, `/agendar` — ver [tabela](#comandos-suportados)
+- **Inscrição modular**: `alertas`, `boletins` ou `todos`, tanto nos comandos quanto na API
+- **Boletim personalizado por grupo** (`/agendar HH:MM`, `/agendar off`)
+- **Localização por GPS**: qualquer mensagem de localização (pin ou live location) salva o local do contato e confirma com `/clima`
+- **Deduplicação de mensagens** por id da Evolution (TTL 5 min)
+- **Formatadores** de resumo, alerta urgente, boletim por período e saudações por horário
+- **Verificação da instância** WhatsApp (`/instance/connectionState`) usada por `/status` e `/admin status`
+- **Administração com sessão** (`/admin`): liberação por número com senha, sessão de 7 dias, allowlist opcional, aviso de vencimento — ver [Administração](#administração-admin)
+
+### ⏱️ Agendamento
+
+- **6 alertas por dia** (06h, 08h, 12h, 14h, 16h, 18h BRT) com jitter 0–5 min anti-spam
+- **Boletim periódico 3×/dia** no grupo (06h, 14h, 20h BRT) com jitter 0–15 min, alvo em `FORECAST_GROUP_JID`
+- **Boletins personalizados** por grupo (cron de minuto em minuto processa só os horários cadastrados)
+- **Aviso de sessão administrativa** vencendo, verificado a cada 5 min
+- **Fonte única do cronograma** em `app/core/schedule.py` — APScheduler no Docker, Cron Triggers no Workers (mesmas horas UTC, jitter dentro do wall time de 15 min)
+- **Prune diário** do histórico de envios (`alert_logs`, retenção de 90 dias)
+
+### 🗄️ Persistência
+
+- **Assinantes, local, tipos de inscrição, horário de boletim, histórico de envios e sessões admin** persistidos em ambos os caminhos
+- **SQLAlchemy async + Alembic** (SQLite/PostgreSQL) no Docker; **Cloudflare D1** no Workers, com o mesmo modelo de domínio (`app/domain.py`) e migrations SQL em `migrations/`
+
+### 📡 API REST
+
+- Endpoints de clima, assinatura (`POST /api/v1/subscribe` com `subscribe`/`unsubscribe`), prévia de boletim, webhook, documentação e health checks — ver [Endpoints](#-endpoints-da-api)
+- **Webhook assíncrono**: a Evolution recebe `200` antes do processamento (`BackgroundTasks` no Docker, `ctx.waitUntil` no Workers)
+- **Health check detalhado** (`/health`) checando banco e Open-Meteo
+
+### 🔐 Segurança e travas operacionais
+
+- **Webhook fail closed** (503 sem `WEBHOOK_AUTH_TOKEN` em produção) com comparação em tempo constante
+- **CORS por allowlist** lida a cada request, sem curinga e sem credenciais
+- **Avisos de configuração insegura** no startup em produção (`production_warnings`)
+- **Travas de ambiente local**: `ENABLE_SCHEDULER=false` e `ALLOW_OUTBOUND=false` por padrão no Compose, para um backend de desenvolvimento não duplicar alertas nem enviar WhatsApp da produção
+
+### 🚀 Infraestrutura e entrega
+
+- **Stack Docker Compose completa** (perfil `dev`): PostgreSQL + Redis + Evolution API + Backend + Frontend, com healthchecks
+- **Cloudflare Workers** (Python Worker + D1 + Cron Triggers + assets estáticos das docs), mesmo código do Docker com imports tardios
+- **CI (GitHub Actions)**: testes, pylint (`--fail-under=9.0`), migrations Alembic, `docker compose config`, build das imagens e `wrangler deploy --dry-run` do bundle Worker
+- **CD (GitHub Actions)**: push em `main` → `pywrangler sync`, migrations D1 remotas, `pywrangler deploy` e checagem de `/health` (requer os segredos `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`)
+- **Frontend React + Vite** — scaffolding pronto (build no CI e no Compose); a UI com dados em tempo real ainda é placeholder (ver seção *Roadmap*)
 
 ---
 
@@ -273,7 +312,9 @@ npm run preview   # Preview do build
 | GET | `/` | Health Check | Status raiz da API |
 | GET | `/health` | Health Check | Health check detalhado |
 | GET | `/api/v1/clima/ping` | Health Check | Ping do módulo de clima |
-| GET | `/api/v1/clima/cariri` | Dados Climáticos | Previsão atual + alertas gerados (`?cidade=Barbalha\|Juazeiro do Norte\|Crato`) |
+| GET | `/api/v1/clima/cariri` | Dados Climáticos | Previsão atual + alertas gerados (`?cidade=Barbalha\|Juazeiro do Norte\|Crato` ou qualquer cidade) |
+| GET | `/api/v1/forecast/preview` | Forecast | Prévia fixa do layout do relatório (teste rápido no Swagger) |
+| POST | `/api/v1/subscribe` | Subscription | Inscreve/cancela (`action`: `subscribe`\|`unsubscribe`, `types`: `alertas`\|`boletins`\|`todos`) |
 | GET | `/docs/whatsapp` | Documentação | Markdown da integração WhatsApp |
 | GET | `/docs/docker` | Documentação | Markdown do setup Docker |
 | POST | `/api/v1/webhook` | Webhook do WhatsApp | Recebe eventos da Evolution API |
@@ -443,8 +484,12 @@ Os comandos valem em **duas formas de invocação**:
 | `/configuracao <lat,lon>` | Define por coordenadas (ex: `/configuracao -7.23, -39.31`) |
 | `/configuracao padrao` | Remove o local e volta à região padrão |
 | `/cidade <nome>` | Atalho de `/configuracao` para cidades |
-| `/inscrever` | Ativa o envio de alertas climáticos para o contato |
-| `/sair` | Cancela a inscrição dos alertas climáticos |
+| `/comparar`, `/crajubar` | Previsão das 3 cidades do Crajubar (Barbalha, Juazeiro do Norte, Crato) na mesma mensagem |
+| `/inscrever [alertas\|boletins\|todos]` | Ativa o envio de alertas climáticos e/ou boletins (padrão: todos) |
+| `/sair [alertas\|boletins\|todos]` | Cancela a inscrição nos tipos informados |
+| `/agendar HH:MM` · `/agendar off` | (Grupos) agenda/desativa o boletim personalizado do grupo |
+| `/admin …` | Administração com sessão — ver [Administração](#administração-admin) |
+| Enviar localização (GPS) | Salva a localização do contato e responde com o local definido |
 | Comando desconhecido (`/foo`) | Mensagem de comando não reconhecido + `/ajuda` |
 | Texto sem invocação | Grupo: silêncio · Privado: dica única de `/ajuda` |
 
@@ -694,7 +739,7 @@ Para ativar o CD: crie um [API Token](https://dash.cloudflare.com/profile/api-to
 - [ ] Estilos SCSS modulares (`*.module.scss` + `_variables.scss`)
 - [ ] Router no frontend (react-router)
 - [ ] Migrar a aplicação para PostgreSQL gerenciado (Neon/Supabase), se necessário
-- [x] Deploy do backend no Cloudflare Workers (D1 + Cron Triggers) e workflow de CD para Workers
+- [x] Deploy do backend no Cloudflare Workers (D1 + Cron Triggers) e workflow de CD para Workers (o CD só roda com os segredos `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` cadastrados)
 - [ ] Broadcast via `TARGET_PHONE_NUMBER`
 - [ ] Lint/format (ruff, ESLint, Prettier)
 - [ ] LICENSE
