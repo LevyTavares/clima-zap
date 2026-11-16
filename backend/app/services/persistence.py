@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import app.db.session as db_session
 from app.core import worker_runtime
+from app.core.config import settings
 from app.core.location import LocationData, match_city
 from app.db import d1
 from app.services import subscription_messages as messages
@@ -310,6 +311,32 @@ async def set_bulletin_time(phone: str, time_str: str | None) -> None:
             subscriber = _orm().Subscriber(phone=phone, is_active=False)
             session.add(subscriber)
         subscriber.bulletin_time = time_str
+        await session.commit()
+
+
+async def get_subscriber_window(phone: str) -> int:
+    """Janela (min) da previsão on-demand do contato — padrão das settings."""
+    if worker_runtime.on_workers():
+        subscriber = await d1.find_subscriber(phone)
+    else:
+        async with db_session.SessionLocal() as session:
+            subscriber = await _find_subscriber(session, phone)
+    if subscriber is None or not subscriber.window_minutes:
+        return settings.forecast_window_minutes
+    return subscriber.window_minutes
+
+
+async def set_subscriber_window(phone: str, minutes: int | None) -> None:
+    """Define (ou limpa) a janela da previsão on-demand do contato."""
+    if worker_runtime.on_workers():
+        await d1.set_window_minutes(phone, minutes)
+        return
+    async with db_session.SessionLocal() as session:
+        subscriber = await _find_subscriber(session, phone)
+        if subscriber is None:
+            subscriber = _orm().Subscriber(phone=phone, is_active=False)
+            session.add(subscriber)
+        subscriber.window_minutes = minutes
         await session.commit()
 
 

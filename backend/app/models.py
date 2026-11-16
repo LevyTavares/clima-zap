@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -29,6 +29,9 @@ class Subscriber(Base):
     awaiting_gps: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # Timestamp (epoch) de expiração do aguardo de GPS (2 min).
     gps_expires_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Janela (min) da previsão on-demand escolhida com /janela (1h..4h).
+    # None = padrão de `settings.forecast_window_minutes`.
+    window_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Inscrição modular: alertas climáticos (weather alerts) e boletins
     # periódicos (forecasts) são independentes — o usuário escolhe um,
     # outro ou ambos (ou nenhum, via /sair).

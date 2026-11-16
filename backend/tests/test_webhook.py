@@ -23,7 +23,11 @@ from app.core.config import settings
 from app.main import app
 from app.models import Subscriber
 from app.services.command_parser import parse_invocation
-from app.services.persistence import is_awaiting_gps, set_awaiting_gps
+from app.services.persistence import (
+    get_subscriber_window,
+    is_awaiting_gps,
+    set_awaiting_gps,
+)
 
 client = TestClient(app)
 RECIPIENT = "5588999999999"
@@ -229,6 +233,31 @@ def test_aguardo_gps_expira(test_database):
     assert subscriber.gps_expires_at is None
 
 
+def test_janela_mostra_padrao_e_define(test_database):
+    assert "60 min" in run_command("/janela")
+
+    assert "120 min" in run_command("/janela 2h")
+    assert run(get_subscriber_window(RECIPIENT)) == 120
+    assert "120 min" in run_command("/janela")
+
+    assert "Janela inválida" in run_command("/janela 5h")
+    assert run(get_subscriber_window(RECIPIENT)) == 120
+
+
+def test_clima_usa_a_janela_escolhida(test_database, monkeypatch):
+    seen = {}
+
+    async def fake_forecast(location=None, window_minutes=None, now=None):
+        seen["window"] = window_minutes
+        return "previsão"
+
+    monkeypatch.setattr("app.api.webhook.build_current_forecast", fake_forecast)
+
+    run_command("/janela 3h")
+    assert run_command("/clima") == "previsão"
+    assert seen["window"] == 180
+
+
 def test_configuracao_geocodes_cities_outside_presets(test_database, monkeypatch):
     async def fake_geocode(query):
         assert query == "fortaleza"
@@ -302,7 +331,7 @@ def test_subscribe_and_leave_cycle(test_database):
 def test_forecast_uses_subscriber_location(test_database, monkeypatch):
     captured = {}
 
-    async def fake_forecast(location=None):
+    async def fake_forecast(location=None, window_minutes=None):
         captured["location"] = location
         return "previsao-ok"
 
@@ -323,7 +352,7 @@ def test_forecast_uses_subscriber_location(test_database, monkeypatch):
 def test_forecast_defaults_to_region_without_city(monkeypatch):
     captured = {}
 
-    async def fake_forecast(location=None):
+    async def fake_forecast(location=None, window_minutes=None):
         captured["location"] = location
         return "previsao-ok"
 

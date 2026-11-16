@@ -11,6 +11,7 @@ def get_help_message() -> str:
         "🔹 */cidade <nome>* — Atalho para definir a cidade (ex: Barbalha, Crato).\n"
         "🔹 */inscrever [alertas|boletins|todos]* — Inscreve em alertas climáticos e/ou boletins periódicos (padrão: todos).\n"
         "🔹 */sair [alertas|boletins|todos]* — Cancela a inscrição nos tipos informados.\n"
+        "🔹 */janela [1h|2h|3h|4h]* — Define a janela da previsão do */clima* (padrão: 1h).\n"
         "🔹 */ajuda* — Exibe este menu de ajuda.\n"
         "🔹 */agendar HH:MM* — (em grupos) agenda boletim personalizado (ex: */agendar 06:30*). Use */agendar off* para desativar.\n\n"
         "💡 _Em grupos, só respondo quando chamado com */comando* ou *@clima-zap*._\n"

@@ -171,3 +171,30 @@ def test_build_current_forecast(monkeypatch):
     msg = asyncio.run(build_current_forecast())
     assert "Previsão" in msg
     assert "Alerta UV" in msg  # uv 8 → alert
+
+
+def test_build_current_forecast_janela_e_formato(monkeypatch):
+    async def mock_fetch(_location=None):
+        return WeatherData(
+            latitude=-7.31,
+            longitude=-39.31,
+            current=CurrentWeather(
+                temperature_2m=30.0,
+                relative_humidity_2m=40,
+                rain=0,
+                uv_index=5,
+            ),
+            daily=DailyWeather(temperature_2m_max=[34.0], temperature_2m_min=[22.0]),
+            hourly=_hourly_fixture(),
+        )
+
+    monkeypatch.setattr("app.services.forecast.fetch_cariri_weather", mock_fetch)
+    now = datetime(2026, 9, 23, 13, 10)
+
+    uma_hora = asyncio.run(build_current_forecast(now=now, window_minutes=60))
+    # 13:10 → 14:10: só o ponto das 14h cai na janela → valor único, sem "a"
+    assert "Temperatura:* 34.0°C\n" in uma_hora
+
+    quatro_horas = asyncio.run(build_current_forecast(now=now, window_minutes=240))
+    # 13:10 → 17:10: pontos 14..17h (34, 20, 21, 22) → faixa real
+    assert "Temperatura:* 20.0°C a 34.0°C" in quatro_horas

@@ -28,10 +28,12 @@ from app.services.forecast import build_current_forecast
 from app.services.persistence import (
     clear_subscriber_location,
     get_subscriber_location,
+    get_subscriber_window,
     is_awaiting_gps,
     is_duplicate_message,
     set_awaiting_gps,
     set_subscriber_location,
+    set_subscriber_window,
     should_hint_dm,
     subscribe_recipient,
     unsubscribe_recipient,
@@ -204,16 +206,21 @@ async def handle_config_command(args: str, recipient: str) -> str:
     return await _apply_city(recipient, query)
 
 
-async def handle_comparar_command() -> str:
+async def handle_comparar_command(recipient: str = "") -> str:
     """Comando `/comparar`: previsão simultânea das 3 cidades do Crajubar."""
     try:
+        window = await get_subscriber_window(recipient) if recipient else None
         locs = [
             match_city("barbalha"),
             match_city("juazeiro do norte"),
             match_city("crato"),
         ]
         forecasts = await asyncio.gather(
-            *[build_current_forecast(loc) for loc in locs if loc is not None]
+            *[
+                build_current_forecast(loc, window)
+                for loc in locs
+                if loc is not None
+            ]
         )
         return (
             "📊 *Comparativo Regional - Crajubar*\n\n"
@@ -291,11 +298,30 @@ async def handle_subscription_command(command: str, recipient: str, args: str = 
     return "✅ " + result["message"]
 
 
+WINDOW_OPTIONS = {"1h": 60, "2h": 120, "3h": 180, "4h": 240}
+
+
+async def handle_window_command(args: str, recipient: str) -> str:
+    """Comando `/janela [1h|2h|3h|4h]` — janela da previsão on-demand."""
+    query = args.strip().lower()
+    options = " · ".join(f"*{key}*" for key in WINDOW_OPTIONS)
+    if not query:
+        return (
+            f"⏱️ Janela atual: *{await get_subscriber_window(recipient)} min*\n"
+            f"Opções: {options} (ex: ```/janela 2h```)."
+        )
+    minutes = WINDOW_OPTIONS.get(query)
+    if minutes is None:
+        return f"❌ Janela inválida. Opções: {options} (ex: ```/janela 2h```)."
+    await set_subscriber_window(recipient, minutes)
+    return f"✅ Janela da previsão definida para *{minutes} min*."
+
+
 async def handle_forecast_command(recipient: str) -> str:
-    """Comando de previsão: usa o local do /configuracao (ou região padrão)."""
+    """Comando de previsão: usa o local e a janela (/janela) do contato."""
     location = await get_subscriber_location(recipient)
     try:
-        return await build_current_forecast(location)
+        return await build_current_forecast(location, await get_subscriber_window(recipient))
     except (httpx.HTTPError, ValueError) as e:
         logger.error("Erro ao buscar previsão: %s", e)
         return FORECAST_ERROR_TEXT
@@ -325,7 +351,10 @@ async def route_command(command: str, args: str, recipient: str) -> str:
         return await handle_config_command(args, recipient)
 
     if command in ("comparar", "crajubar"):
-        return await handle_comparar_command()
+        return await handle_comparar_command(recipient)
+
+    if command in ("janela", "janelas"):
+        return await handle_window_command(args, recipient)
 
     if command in ("inscrever", "sair"):
         return await handle_subscription_command(command, recipient, args)

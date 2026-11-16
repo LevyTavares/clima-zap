@@ -160,10 +160,15 @@ def format_window_summary(  # pylint: disable=too-many-arguments,too-many-positi
 
     greeting = time_greeting()
 
+    if temp_min == temp_max:
+        temp_text = f"{temp_min:.1f}°C"
+    else:
+        temp_text = f"{temp_min:.1f}°C a {temp_max:.1f}°C"
+
     message = (
         f"{greeting}\n\n"
         f"📍 *Previsão para {city} — próximos {window_minutes} min*\n\n"
-        f"🌡️ *Temperatura:* {temp_min}°C a {temp_max}°C\n"
+        f"🌡️ *Temperatura:* {temp_text}\n"
         f"💧 *Umidade:* {humidity}%\n"
         f"🌧️ *Chance de Chuva:* {rain_prob}%\n"
         f"{uv_text}\n\n"

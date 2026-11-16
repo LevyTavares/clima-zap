@@ -25,3 +25,4 @@ class Subscriber:
     bulletin_time: str | None = None
     awaiting_gps: bool = False
     gps_expires_at: float | None = None
+    window_minutes: int | None = None

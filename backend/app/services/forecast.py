@@ -1,7 +1,7 @@
 """Builders de mensagem de previsão (comandos on-demand e boletim periódico)."""
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from app.api.api import fetch_cariri_weather
@@ -18,6 +18,16 @@ logger = logging.getLogger("uvicorn.error")
 
 Period = Literal["morning", "afternoon", "night"]
 
+# America/Fortaleza = UTC-3, sem DST. O Worker roda em UTC: `datetime.now()`
+# cru deslocava janela e período em 3h em produção.
+FORTRALEZA_TZ = timezone(timedelta(hours=-3))
+
+
+def local_now() -> datetime:
+    """Agora em America/Fortaleza, naive (as séries horárias vêm sem tz)."""
+    return datetime.now(timezone.utc).astimezone(FORTRALEZA_TZ).replace(tzinfo=None)
+
+
 # horas locais (America/Fortaleza) de cada período
 PERIOD_HOURS: dict[Period, tuple[int, int]] = {
     # (start inclusive, end exclusive); night cruza meia-noite → resolve com 2 dias
@@ -28,18 +38,18 @@ PERIOD_HOURS: dict[Period, tuple[int, int]] = {
 
 
 async def build_current_forecast(
-    location: LocationData | None = None, window_minutes: int | None = None
+    location: LocationData | None = None,
+    window_minutes: int | None = None,
+    now: datetime | None = None,
 ) -> str:
     """Forecast on-demand do comando `forecast` para os próximos N minutos."""
-    from datetime import datetime, timedelta
-
     if window_minutes is None:
         window_minutes = settings.forecast_window_minutes
 
     w = await fetch_cariri_weather(location)
     city = location["name"] if location else settings.default_city
     cur = w.current
-    now = datetime.now()
+    now = now or local_now()
     cutoff = now + timedelta(minutes=window_minutes)
 
     temps: list[float] = []
@@ -127,7 +137,7 @@ def aggregate_period_hourly(hourly, period: Period, now: datetime | None = None)
     hourly: HourlyWeather (ou dict-like com listas).
     Retorna None se não houver dados na janela.
     """
-    now = now or datetime.now()
+    now = now or local_now()
     times: list[str] = hourly.time or []
     if not times:
         return None

@@ -164,6 +164,31 @@ class FakeD1:
             self._next_id += 1
             changes = 1
 
+        elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, window_minutes) VALUES (?, 0, 0, 0, ?)":
+            self.subscribers[params[0]] = {
+                "id": self._next_id,
+                "phone": params[0],
+                "name": None,
+                "city": None,
+                "latitude": None,
+                "longitude": None,
+                "is_active": 0,
+                "receive_alerts": 0,
+                "receive_bulletins": 0,
+                "bulletin_time": None,
+                "awaiting_gps": 0,
+                "gps_expires_at": None,
+                "window_minutes": params[1],
+            }
+            self._next_id += 1
+            changes = 1
+
+        elif sql == "UPDATE subscribers SET window_minutes = ? WHERE phone = ?":
+            subscriber = self.subscribers.get(params[1])
+            if subscriber is not None:
+                subscriber["window_minutes"] = params[0]
+                changes = 1
+
         elif sql == "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, bulletin_time) VALUES (?, 0, 0, 0, ?)":
             self.subscribers[params[0]] = {
                 "id": self._next_id,
@@ -470,6 +495,19 @@ def test_legacy_city_without_coords_resolves_preset_via_d1(workers_env):  # pyli
 
     assert location["name"] == "Crato"
     assert location["latitude"] == pytest.approx(-7.2342)
+
+
+def test_janela_da_previsao_via_d1(workers_env):  # pylint: disable=unused-argument
+    async def flow():
+        padrao = await persistence.get_subscriber_window("+5588777777777")
+        await persistence.set_subscriber_window("+5588777777777", 180)
+        return padrao, await persistence.get_subscriber_window("+5588777777777")
+
+    padrao, escolhida = asyncio.run(flow())
+
+    assert padrao == settings.forecast_window_minutes
+    assert escolhida == 180
+    assert workers_env.DB.subscribers["+5588777777777"]["window_minutes"] == 180
 
 
 def test_dm_hint_shown_only_once_via_d1(workers_env):  # pylint: disable=unused-argument

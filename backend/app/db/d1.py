@@ -70,6 +70,7 @@ def _row_to_subscriber(row: dict) -> Subscriber:
         bulletin_time=row.get("bulletin_time"),
         awaiting_gps=bool(row.get("awaiting_gps", 0)),
         gps_expires_at=row.get("gps_expires_at"),
+        window_minutes=row.get("window_minutes"),
     )
 
 
@@ -209,6 +210,20 @@ async def set_bulletin_time(phone: str, time_str: str | None) -> None:
         await _db().prepare(
             "UPDATE subscribers SET bulletin_time = ? WHERE phone = ?"
         ).bind(time_str, phone).run()
+
+
+async def set_window_minutes(phone: str, minutes: int | None) -> None:
+    """Define a janela (min) da previsão on-demand do contato."""
+    subscriber = await find_subscriber(phone)
+    if subscriber is None:
+        await _db().prepare(
+            "INSERT INTO subscribers (phone, is_active, receive_alerts, receive_bulletins, window_minutes) "
+            "VALUES (?, 0, 0, 0, ?)"
+        ).bind(phone, minutes).run()
+    else:
+        await _db().prepare(
+            "UPDATE subscribers SET window_minutes = ? WHERE phone = ?"
+        ).bind(minutes, phone).run()
 
 
 async def set_awaiting_gps(phone: str, value: bool, expires: float | None = None) -> None:
